@@ -501,8 +501,9 @@ def forced_tool_for_message(message: str) -> tuple[str, dict[str, Any]] | None:
     batch_match = re.search(r"\b([abc]-\d+)\b", normalized)
     if batch_match and any(word in normalized for word in ("проверь", "качество", "статус", "парт")):
         return "check_batch_quality", {"batch_id": batch_match.group(1).upper()}
-    if any(word in normalized for word in ("недельный план", "составь план", "план производства")):
-        return "build_weekly_plan", {"requirements": requirements_default(), "policy": "hybrid", "allow_rework": True}
+    if any(word in normalized for word in ("недельный план", "составь план", "план производства", "построй план")):
+        requirements = parse_requirements(message)
+        if set(requirements) == set(MATERIALS): return "build_weekly_plan", {"requirements": requirements, "policy": "hybrid", "allow_rework": True}
     return None
 
 
@@ -513,6 +514,15 @@ def requested_material(message: str) -> str | None:
 
 def material_choices(prompt: str) -> list[dict[str, str]]:
     return [{"label": "Все материалы", "value": f"{prompt} по всем материалам"}] + [{"label": item, "value": f"{prompt} по материалу {item}"} for item in MATERIALS]
+
+
+def parse_requirements(message: str) -> dict[str, float]:
+    normalized = message.lower().replace(",", ".")
+    values: dict[str, float] = {}
+    for material in MATERIALS:
+        match = re.search(rf"(?:материал\s*)?\b{material.lower()}\b\s*(?:[:=]|[-–])?\s*(\d+(?:\.\d+)?)", normalized)
+        if match: values[material] = float(match.group(1))
+    return values
 
 
 def explanation_tool_for_message(message: str) -> str | None:
@@ -882,9 +892,15 @@ def chat(payload: ChatIn, request: Request) -> Any:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(MATERIALS), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized and not explanation:
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": ["Все материалы", *MATERIALS], "tool_calls": []}
+            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         material = requested_material(payload.message)
+        plan_request = any(word in normalized for word in ("недельный план", "составь план", "план производства", "построй план")) and not explanation
+        if plan_request:
+            supplied = parse_requirements(payload.message); missing = [m for m in MATERIALS if m not in supplied]
+            if missing:
+                answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": f"Чтобы построить недельный план, укажите потребность по активному веществу для {', '.join(missing)}. Например: A 3000, B 3000, C 3000.", "needs_clarification": True, "choices": [], "tool_calls": []}
+                con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         if any(word in normalized for word in ("остат", "склад", "запас")) and not material and "все" not in normalized and "всем" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
@@ -928,7 +944,11 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(MATERIALS), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized and not explanation:
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": ["Все материалы", *MATERIALS], "tool_calls": []}
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
+                yield sse_event({"type": "token", "text": response["answer"]})
+            elif any(word in normalized for word in ("недельный план", "составь план", "план производства", "построй план")) and not explanation and set(parse_requirements(payload.message)) != set(MATERIALS):
+                missing = [m for m in MATERIALS if m not in parse_requirements(payload.message)]
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": f"Чтобы построить недельный план, укажите потребность по активному веществу для {', '.join(missing)}. Например: A 3000, B 3000, C 3000.", "needs_clarification": True, "choices": [], "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             elif any(word in normalized for word in ("остат", "склад", "запас")) and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
