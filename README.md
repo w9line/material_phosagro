@@ -27,7 +27,7 @@ curl http://localhost:8009/health
 
 ## LLM
 
-Задайте `LLM_API_KEY` и при необходимости `LLM_BASE_URL`, затем перезапустите API. Для VseLLM используется `https://api.vsellm.ru/v1`; ключ не попадает во frontend. Без ключа чат работает в offline-режиме через тот же backend. `LLM_MAX_TOOL_ROUNDS=2` и `LLM_MAX_TOKENS=700` ограничивают задержку и размер ответа.
+Задайте `LLM_API_KEY` и при необходимости `LLM_BASE_URL`, затем перезапустите API. Для VseLLM используется `https://api.vsellm.ru/v1`; ключ не попадает во frontend. Без ключа чат работает в offline-режиме через тот же backend. `LLM_MAX_TOOL_ROUNDS=2` и `LLM_MAX_TOKENS=2000` удерживают reasoning-модель в пределах разумной задержки без пустых ответов.
 
 Администратор создаётся из `ADMIN_USERNAME`/`ADMIN_PASSWORD` при первом запуске. На `pm_rtx` заданы креды из ТЗ; в репозитории пароль не хранится.
 

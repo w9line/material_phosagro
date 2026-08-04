@@ -490,10 +490,18 @@ def summarize_tool_result(data: Any) -> str:
     return "Расчёт завершён. Подробности доступны в результате инструмента."
 
 
-def capability_answer(message: str) -> str | None:
+def forced_tool_for_message(message: str) -> tuple[str, dict[str, Any]] | None:
     normalized = message.lower()
-    if any(phrase in normalized for phrase in ("что ты умеешь", "что умеешь", "что можешь", "возможности", "как ты работаешь")) or normalized.strip() in ("привет", "здравствуй", "добрый день"):
-        return "Я умею работать с текущим реестром сырья:\n\n• проверять качество конкретной партии;\n• показывать остатки и активное вещество;\n• строить недельный preview-план и сравнивать стратегии;\n• формировать отчёт по браку и доработке;\n• уточнять недостающие параметры прямо в чате.\n\nДанные беру инструментами системы, числа не придумываю. Например: «проверь самую старую партию» или «покажи остатки по материалу A»."
+    material = next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
+    if any(word in normalized for word in ("остат", "склад", "сырь")):
+        return "get_inventory_summary", {"material_type": material, "group_by": "material_and_status"}
+    if any(word in normalized for word in ("брак", "отбрак", "доработ")):
+        return "generate_rejection_report", {"material_type": material, "include_rework": True, "include_rejected": True}
+    batch_match = re.search(r"\b([abc]-\d+)\b", normalized)
+    if batch_match and any(word in normalized for word in ("проверь", "качество", "статус", "парт")):
+        return "check_batch_quality", {"batch_id": batch_match.group(1).upper()}
+    if any(word in normalized for word in ("недельный план", "составь план", "план производства")):
+        return "build_weekly_plan", {"requirements": requirements_default(), "policy": "hybrid", "allow_rework": True}
     return None
 
 
@@ -507,6 +515,8 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
     messages.append({"role": "user", "content": message})
     trace: list[dict[str, Any]] = []
     last_data: Any = None
+    forced_used = False
+    retry_used = False
     for _ in range(int(os.getenv("LLM_MAX_TOOL_ROUNDS", "4"))):
         body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "700")), "messages": messages, "tools": tool_specs(), "tool_choice": "auto"}
         req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
@@ -515,7 +525,22 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
         messages.append(msg)
         calls = msg.get("tool_calls") or []
         if not calls:
+            forced = forced_tool_for_message(message) if not forced_used else None
+            if forced:
+                forced_used = True
+                name, args = forced; call_id = "forced-" + uuid.uuid4().hex
+                try:
+                    last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success"}); tool_result = last_data
+                except Exception as exc:
+                    trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc)}); tool_result = {"error": str(exc)}
+                messages.append({"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]})
+                messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": json.dumps(tool_result, ensure_ascii=False)})
+                continue
             content = (msg.get("content") or "").strip()
+            if not content and not retry_used:
+                retry_used = True
+                messages.append({"role": "user", "content": "Сформулируй короткий содержательный ответ на исходный вопрос. Не возвращай пустой ответ."})
+                continue
             return "llm", content or summarize_tool_result(last_data), last_data, trace
         for call in calls:
             name = call["function"]["name"]
@@ -543,6 +568,8 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
     messages.append({"role": "user", "content": message})
     trace: list[dict[str, Any]] = []
     last_data: Any = None
+    forced_used = False
+    retry_used = False
     max_rounds = int(os.getenv("LLM_MAX_TOOL_ROUNDS", "2"))
     for round_index in range(max_rounds):
         body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "700")), "messages": messages, "tools": tool_specs(), "tool_choice": "auto"}
@@ -557,7 +584,24 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                 messages.append(msg)
                 calls = msg.get("tool_calls") or []
                 if not calls:
-                    answer = (msg.get("content") or "").strip() or summarize_tool_result(last_data)
+                    forced = forced_tool_for_message(message) if not forced_used else None
+                    if forced:
+                        forced_used = True
+                        name, args = forced; call_id = "forced-" + uuid.uuid4().hex
+                        try:
+                            last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success"}); tool_result = last_data
+                        except Exception as exc:
+                            trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc)}); tool_result = {"error": str(exc)}
+                        messages.append({"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]})
+                        messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": json.dumps(tool_result, ensure_ascii=False)})
+                        yield {"type": "tool", "tool": name, "status": trace[-1]["status"]}
+                        continue
+                    content = (msg.get("content") or "").strip()
+                    if not content and not retry_used:
+                        retry_used = True
+                        messages.append({"role": "user", "content": "Сформулируй короткий содержательный ответ на исходный вопрос. Не возвращай пустой ответ."})
+                        continue
+                    answer = content or summarize_tool_result(last_data)
                     yield {"type": "token", "text": answer}
                     yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": last_data, "tool_calls": trace}}
                     return
@@ -801,9 +845,6 @@ def chat(payload: ChatIn, request: Request) -> Any:
     con.execute("UPDATE chats SET title=? WHERE chat_id=? AND title='Новый чат'", (payload.message.strip()[:80] or "Новый чат", chat_id)); con.commit(); con.close()
     try:
         normalized = payload.message.lower()
-        if capability_answer(payload.message):
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": capability_answer(payload.message), "tool_calls": []}
-            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized:
             con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
@@ -814,8 +855,7 @@ def chat(payload: ChatIn, request: Request) -> Any:
         if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": ["Все материалы", *MATERIALS], "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        oldest_query = any(x in normalized for x in ("самую старую", "самая старая", "самый старый")) and any(m.lower() in normalized for m in MATERIALS)
-        result = local_agent(payload.message) if oldest_query else (llm_agent(payload.message, history) or local_agent(payload.message))
+        result = llm_agent(payload.message, history) or local_agent(payload.message)
         name, answer, data, trace = result
         response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "llm" if name == "llm" else "offline", "answer": answer, "tool": trace[-1]["tool"] if trace else None, "tool_calls": trace, "result": data}
         con = db(); save_message(con, chat_id, "assistant", answer, trace); con.commit(); con.close(); return response
@@ -841,10 +881,7 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
         response: dict[str, Any] | None = None
         try:
             normalized = payload.message.lower()
-            if capability_answer(payload.message):
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": capability_answer(payload.message), "tool_calls": []}
-                yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized:
+            if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized:
                 con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
@@ -855,20 +892,12 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": ["Все материалы", *MATERIALS], "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             else:
-                oldest_query = any(x in normalized for x in ("самую старую", "самая старая", "самый старый")) and any(m.lower() in normalized for m in MATERIALS)
-                if oldest_query:
-                    name, answer, data, trace = local_agent(payload.message)
-                    yield sse_event({"type": "status", "text": "Готовлю расчёт…"})
-                    for item in trace: yield sse_event({"type": "tool", "tool": item["tool"], "status": item["status"]})
-                    response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "offline", "answer": answer, "tool": trace[-1]["tool"] if trace else None, "tool_calls": trace, "result": data}
-                    yield sse_event({"type": "token", "text": answer})
-                else:
-                    yield sse_event({"type": "status", "text": "Запрашиваю расчёт…"})
-                    for item in llm_agent_stream(payload.message, history):
-                        if item.get("type") == "done":
-                            response = item["response"]; response.update({"run_id": str(uuid.uuid4()), "chat_id": chat_id})
-                        else:
-                            yield sse_event(item)
+                yield sse_event({"type": "status", "text": "Запрашиваю расчёт…"})
+                for item in llm_agent_stream(payload.message, history):
+                    if item.get("type") == "done":
+                        response = item["response"]; response.update({"run_id": str(uuid.uuid4()), "chat_id": chat_id})
+                    else:
+                        yield sse_event(item)
             if response:
                 con = db(); save_message(con, chat_id, "assistant", response["answer"], response.get("tool_calls", [])); con.commit(); con.close()
                 yield sse_event({"type": "done", "response": response})
