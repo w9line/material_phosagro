@@ -491,6 +491,7 @@ def summarize_tool_result(data: Any) -> str:
 
 
 def forced_tool_for_message(message: str) -> tuple[str, dict[str, Any]] | None:
+    if explanation_tool_for_message(message): return None
     normalized = message.lower()
     material = next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
     if any(word in normalized for word in ("остат", "склад", "сырь")):
@@ -505,11 +506,36 @@ def forced_tool_for_message(message: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def requested_material(message: str) -> str | None:
+    normalized = message.lower()
+    return next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
+
+
+def material_choices(prompt: str) -> list[dict[str, str]]:
+    return [{"label": "Все материалы", "value": f"{prompt} по всем материалам"}] + [{"label": item, "value": f"{prompt} по материалу {item}"} for item in MATERIALS]
+
+
+def explanation_tool_for_message(message: str) -> str | None:
+    normalized = message.lower()
+    if not any(word in normalized for word in ("как работает", "как устроен", "объясни", "расскажи про", "что делает")):
+        return None
+    if any(word in normalized for word in ("остат", "склад", "запас", "сырь")): return "get_inventory_summary"
+    if any(word in normalized for word in ("брак", "отбрак", "доработ")): return "generate_rejection_report"
+    if any(word in normalized for word in ("план", "планирован")): return "build_weekly_plan"
+    if any(word in normalized for word in ("дефицит", "хватит", "потребн")): return "check_material_deficit"
+    if any(word in normalized for word in ("стратег", "распредел")): return "compare_allocation_policies"
+    if any(word in normalized for word in ("классифиц", "класс")): return "classify_batches"
+    if any(word in normalized for word in ("парт", "качество", "статус")): return "check_batch_quality"
+    return None
+
+
 def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, Any, list[dict[str, Any]]] | None:
     key = os.getenv("LLM_API_KEY")
     if not key: return None
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    explanation_tool = explanation_tool_for_message(message)
     system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски. Все данные и расчёты получай только через инструменты. Не придумывай партии и числа. После tool call объясни результат простыми словами, отделяй массу сырья от массы активного вещества. Preview-план не подтверждай сам. Всегда заверши ответ коротким понятным текстом; пустой ответ запрещён."""
+    if explanation_tool: system += f" Пользователь просит объяснить инструмент {explanation_tool}: расскажи его назначение, когда он нужен, какие параметры принимает и что возвращает. Не запускай инструмент для такого объяснения и не выдавай справку про другие инструменты. Используй только точную схему инструмента: для get_inventory_summary доступны material_type (A, B, C или null) и group_by=material_and_status; не придумывай другие поля или материалы. Ответ краткий — до 120 слов."
     messages = [{"role": "system", "content": system}]
     messages.extend({"role": x["role"], "content": x["content"]} for x in history if x.get("role") in ("user", "assistant") and x.get("content"))
     messages.append({"role": "user", "content": message})
@@ -518,7 +544,7 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
     forced_used = False
     retry_used = False
     for _ in range(int(os.getenv("LLM_MAX_TOOL_ROUNDS", "4"))):
-        body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "700")), "messages": messages, "tools": tool_specs(), "tool_choice": "auto"}
+        body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2000")), "messages": messages, "tools": tool_specs(), "tool_choice": "auto"}
         req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response: result = json.load(response)
         msg = result["choices"][0]["message"]
@@ -562,7 +588,9 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
         yield {"type": "done", "response": {"mode": "offline", "answer": answer, "result": data, "tool_calls": trace}}
         return
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    explanation_tool = explanation_tool_for_message(message)
     system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски. Все данные и расчёты получай только через инструменты. Не придумывай партии и числа. После tool call объясни результат простыми словами, отделяй массу сырья от массы активного вещества. Preview-план не подтверждай сам. Всегда заверши ответ коротким понятным текстом; пустой ответ запрещён."""
+    if explanation_tool: system += f" Пользователь просит объяснить инструмент {explanation_tool}: расскажи его назначение, когда он нужен, какие параметры принимает и что возвращает. Не запускай инструмент для такого объяснения и не выдавай справку про другие инструменты. Используй только точную схему инструмента: для get_inventory_summary доступны material_type (A, B, C или null) и group_by=material_and_status; не придумывай другие поля или материалы. Ответ краткий — до 120 слов."
     messages = [{"role": "system", "content": system}]
     messages.extend({"role": x["role"], "content": x["content"]} for x in history if x.get("role") in ("user", "assistant") and x.get("content"))
     messages.append({"role": "user", "content": message})
@@ -572,10 +600,11 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
     retry_used = False
     max_rounds = int(os.getenv("LLM_MAX_TOOL_ROUNDS", "2"))
     for round_index in range(max_rounds):
-        body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "700")), "messages": messages, "tools": tool_specs(), "tool_choice": "auto"}
+        body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2000")), "messages": messages, "tools": tool_specs(), "tool_choice": "auto"}
         streaming = round_index > 0
         if streaming:
-            body.update({"stream": True, "tool_choice": "none"})
+            body["stream"] = True
+            body["tool_choice"] = "auto" if explanation_tool else "none"
         req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response:
             if not streaming:
@@ -844,16 +873,26 @@ def chat(payload: ChatIn, request: Request) -> Any:
     save_message(con, chat_id, "user", payload.message)
     con.execute("UPDATE chats SET title=? WHERE chat_id=? AND title='Новый чат'", (payload.message.strip()[:80] or "Новый чат", chat_id)); con.commit(); con.close()
     try:
-        normalized = payload.message.lower()
-        if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized:
+        normalized = payload.message.lower(); explanation = explanation_tool_for_message(payload.message)
+        if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized and not explanation:
             con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if "самую стар" in normalized and not any(m.lower() in normalized for m in MATERIALS):
+        if "самую стар" in normalized and not any(m.lower() in normalized for m in MATERIALS) and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(MATERIALS), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized:
+        if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": ["Все материалы", *MATERIALS], "tool_calls": []}
+            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
+        material = requested_material(payload.message)
+        if any(word in normalized for word in ("остат", "склад", "запас")) and not material and "все" not in normalized and "всем" not in normalized and not explanation:
+            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
+            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
+        if any(word in normalized for word in ("дефицит", "хватит", "потребн")) and not material and "все" not in normalized and "всем" not in normalized and not explanation:
+            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала проверить дефицит?", "question": "Для какого материала проверить дефицит?", "needs_clarification": True, "choices": material_choices("Проверь дефицит"), "tool_calls": []}
+            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
+        if any(word in normalized for word in ("сравни стратег", "сравнить стратег")) and not any(word in normalized for word in ("fifo", "hybrid", "концентрац")) and not explanation:
+            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какие стратегии сравнить?", "question": "Какие стратегии сравнить?", "needs_clarification": True, "choices": [{"label": "Все три стратегии", "value": "Сравни все стратегии распределения"}, {"label": "FIFO vs Hybrid", "value": "Сравни стратегии FIFO и hybrid"}, {"label": "FIFO vs концентрация", "value": "Сравни strict_fifo и max_concentration"}], "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         result = llm_agent(payload.message, history) or local_agent(payload.message)
         name, answer, data, trace = result
@@ -880,16 +919,25 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
     def events():
         response: dict[str, Any] | None = None
         try:
-            normalized = payload.message.lower()
-            if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized:
+            normalized = payload.message.lower(); explanation = explanation_tool_for_message(payload.message)
+            if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized and not explanation:
                 con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif "самую стар" in normalized and not any(m.lower() in normalized for m in MATERIALS):
+            elif "самую стар" in normalized and not any(m.lower() in normalized for m in MATERIALS) and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(MATERIALS), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized:
+            elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": ["Все материалы", *MATERIALS], "tool_calls": []}
+                yield sse_event({"type": "token", "text": response["answer"]})
+            elif any(word in normalized for word in ("остат", "склад", "запас")) and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
+                yield sse_event({"type": "token", "text": response["answer"]})
+            elif any(word in normalized for word in ("дефицит", "хватит", "потребн")) and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала проверить дефицит?", "question": "Для какого материала проверить дефицит?", "needs_clarification": True, "choices": material_choices("Проверь дефицит"), "tool_calls": []}
+                yield sse_event({"type": "token", "text": response["answer"]})
+            elif any(word in normalized for word in ("сравни стратег", "сравнить стратег")) and not any(word in normalized for word in ("fifo", "hybrid", "концентрац")) and not explanation:
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какие стратегии сравнить?", "question": "Какие стратегии сравнить?", "needs_clarification": True, "choices": [{"label": "Все три стратегии", "value": "Сравни все стратегии распределения"}, {"label": "FIFO vs Hybrid", "value": "Сравни стратегии FIFO и hybrid"}, {"label": "FIFO vs концентрация", "value": "Сравни strict_fifo и max_concentration"}], "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             else:
                 yield sse_event({"type": "status", "text": "Запрашиваю расчёт…"})
