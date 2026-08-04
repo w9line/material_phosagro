@@ -1,0 +1,200 @@
+{"query":"Проверь качество партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Проверь качество партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Покажи детали партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии B-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии C-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Покажи детали партии A-002","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Проведи классификацию партий A","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий B","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий C","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий ","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий A","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий B","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий C","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий ","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий A","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий B","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий C","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий ","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий A","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий B","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий C","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий ","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий A","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий B","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по C","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по C","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по C","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по C","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по C","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки по C","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Построй недельный план A 3000 кг активного вещества B 2500 кг активного вещества C 1800 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3001 кг активного вещества B 2501 кг активного вещества C 1801 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3002 кг активного вещества B 2502 кг активного вещества C 1802 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3003 кг активного вещества B 2503 кг активного вещества C 1803 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3004 кг активного вещества B 2504 кг активного вещества C 1804 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3005 кг активного вещества B 2505 кг активного вещества C 1805 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3006 кг активного вещества B 2506 кг активного вещества C 1806 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3007 кг активного вещества B 2507 кг активного вещества C 1807 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3008 кг активного вещества B 2508 кг активного вещества C 1808 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3009 кг активного вещества B 2509 кг активного вещества C 1809 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3010 кг активного вещества B 2510 кг активного вещества C 1810 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3011 кг активного вещества B 2511 кг активного вещества C 1811 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3012 кг активного вещества B 2512 кг активного вещества C 1812 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3013 кг активного вещества B 2513 кг активного вещества C 1813 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3014 кг активного вещества B 2514 кг активного вещества C 1814 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3015 кг активного вещества B 2515 кг активного вещества C 1815 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3016 кг активного вещества B 2516 кг активного вещества C 1816 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план A 3017 кг активного вещества B 2517 кг активного вещества C 1817 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Проверь дефицит A 3000 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит B 3001 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 3002 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит A 3003 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит B 3004 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 3005 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит A 3006 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит B 3007 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 3008 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит A 3009 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит B 3010 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 3011 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит A 3012 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит B 3013 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 3014 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит A 3015 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит B 3016 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 3017 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3000 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для B 3001 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для C 3002 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3003 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для B 3004 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для C 3005 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3006 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для B 3007 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для C 3008 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3009 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для B 3010 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для C 3011 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3012 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для B 3013 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для C 3014 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3015 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для B 3016 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии FIFO и hybrid для C 3017 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку B","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку C","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку B","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку C","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку B","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку C","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку B","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку C","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку B","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку C","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку B","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Сформируй отчёт по браку C","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Смоделируй сценарий A на 10% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий B на 11% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий C на 12% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий A на 13% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий B на 14% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий C на 15% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий A на 16% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий B на 17% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий C на 18% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий A на 19% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий B на 20% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий C на 21% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий A на 22% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий B на 23% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий C на 24% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий A на 25% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий B на 26% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Смоделируй сценарий C на 27% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Как работает недельный план?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает остатки?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает отчёт по браку?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает классификация?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает сценарий?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает недельный план?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает остатки?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает отчёт по браку?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает классификация?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает сценарий?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает недельный план?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает остатки?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает отчёт по браку?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает классификация?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает сценарий?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает недельный план?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает остатки?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Как работает отчёт по браку?","expected_intent":"EXPLAIN_TOOL"}
+{"query":"Построй недельный план","expected_intent":"CLARIFY","expected_tool":"build_weekly_plan"}
+{"query":"Покажи остатки","expected_intent":"CLARIFY","expected_tool":"get_inventory_summary"}
+{"query":"Проверь дефицит","expected_intent":"CLARIFY","expected_tool":"check_material_deficit"}
+{"query":"Сравни стратегии","expected_intent":"CLARIFY","expected_tool":"compare_allocation_policies"}
+{"query":"Смоделируй сценарий","expected_intent":"CLARIFY","expected_tool":"simulate_requirement_change"}
+{"query":"Построй недельный план","expected_intent":"CLARIFY","expected_tool":"build_weekly_plan"}
+{"query":"Покажи остатки","expected_intent":"CLARIFY","expected_tool":"get_inventory_summary"}
+{"query":"Проверь дефицит","expected_intent":"CLARIFY","expected_tool":"check_material_deficit"}
+{"query":"Сравни стратегии","expected_intent":"CLARIFY","expected_tool":"compare_allocation_policies"}
+{"query":"Смоделируй сценарий","expected_intent":"CLARIFY","expected_tool":"simulate_requirement_change"}
+{"query":"Построй недельный план","expected_intent":"CLARIFY","expected_tool":"build_weekly_plan"}
+{"query":"Покажи остатки","expected_intent":"CLARIFY","expected_tool":"get_inventory_summary"}
+{"query":"Проверь дефицит","expected_intent":"CLARIFY","expected_tool":"check_material_deficit"}
+{"query":"Сравни стратегии","expected_intent":"CLARIFY","expected_tool":"compare_allocation_policies"}
+{"query":"Смоделируй сценарий","expected_intent":"CLARIFY","expected_tool":"simulate_requirement_change"}
+{"query":"Построй недельный план","expected_intent":"CLARIFY","expected_tool":"build_weekly_plan"}
+{"query":"Покажи остатки","expected_intent":"CLARIFY","expected_tool":"get_inventory_summary"}
+{"query":"Проверь дефицит","expected_intent":"CLARIFY","expected_tool":"check_material_deficit"}
+{"query":"Сравни стратегии","expected_intent":"CLARIFY","expected_tool":"compare_allocation_policies"}
+{"query":"Смоделируй сценарий","expected_intent":"CLARIFY","expected_tool":"simulate_requirement_change"}
