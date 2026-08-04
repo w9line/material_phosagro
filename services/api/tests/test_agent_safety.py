@@ -53,12 +53,30 @@ def test_conversational_inventory_and_planning_phrases_are_understood():
     assert app.route_intent("мы неделю вытянем по A 3000 кг активного вещества?")["tool_name"] == "check_material_deficit"
     assert app.route_intent("где больше всего потерь")["tool_name"] == "get_inventory_summary"
     assert app.route_intent("Сделай отчёт по отклонениям B")["tool_name"] == "generate_rejection_report"
+    assert app.route_intent("Хватит ли B на потребность 2500 кг активного вещества")["tool_name"] == "check_material_deficit"
+    assert app.route_intent("Что будет, если потребность C вырастет на 15% hybrid")["tool_name"] == "simulate_requirement_change"
+    assert app.route_intent("Построй план A 1200 кг активного вещества B 900 кг активного вещества C 700 кг активного вещества max concentration")["arguments"]["policy"] == "max_concentration"
 
 
 def test_final_answer_numbers_must_be_grounded():
     result = {"available_active_mass_kg": 2800.0, "deficit_active_mass_kg": 200.0}
     assert app.answer_numbers_are_grounded("Доступно 2800 кг, дефицит 200 кг.", result)
     assert not app.answer_numbers_are_grounded("Доступно 3000 кг, дефицита нет.", result)
+    assert app.answer_numbers_are_grounded("Партия A-002: концентрация 30.1%.", {"concentration_percent": 30.1})
+    assert app.answer_numbers_are_grounded("Итого 7012.7 кг.", {"available_active_mass_kg": 7012.718})
+
+
+def test_obvious_requests_use_backend_router_before_llm(monkeypatch):
+    monkeypatch.setattr(app, "tool", lambda name, args: {"groups": [], "meta": {"tool": name, "args": args}})
+    routed = app.routed_tool_result("Покажи остатки по B", [])
+    assert routed[0] == "get_inventory_summary"
+    assert routed[2][0]["source"] == "router"
+
+
+def test_llm_context_is_compact():
+    history = [{"role": "user", "content": "x" * 2000}, {"role": "assistant", "content": "y" * 2000}]
+    assert len(app.compact_history(history)[0]["content"]) == 700
+    assert '"last_user_request"' in app.llm_context(history)
 
 
 def test_plan_requires_explicit_inputs_and_policy():

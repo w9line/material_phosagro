@@ -482,7 +482,7 @@ def tool(name: str, args: dict[str, Any]) -> Any:
     if name == "compare_allocation_policies":
         con.close(); req = args.get("requirements") or requirements_default(); return {"policies": {p: build_plan(req, p, True) for p in args.get("policies", POLICIES)}, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
     if name == "generate_rejection_report":
-        material = args.get("material_type"); rows = [batch_dict(r) for r in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close(); statuses = set([x for x, enabled in (("REWORK", args.get("include_rework", True)), ("REJECTED", args.get("include_rejected", True))) if enabled]); selected = [r for r in rows if r["quality"]["status"] in statuses]; return {"report_id": str(uuid.uuid4()), "batches": selected, "total_raw_mass_kg": sum(r["remaining_raw_mass_kg"] for r in selected), "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
+        material = args.get("material_type"); rows = [batch_dict(r) for r in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close(); statuses = set([x for x, enabled in (("REWORK", args.get("include_rework", True)), ("REJECTED", args.get("include_rejected", True))) if enabled]); selected = [r for r in rows if r["quality"]["status"] in statuses]; return {"report_id": str(uuid.uuid4()), "batches": selected, "total_batches": len(selected), "total_raw_mass_kg": sum(r["remaining_raw_mass_kg"] for r in selected), "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
     if name == "simulate_requirement_change":
         con.close(); base = args.get("base_requirements") or requirements_default(); changes = args.get("changes_percent") or {}; new = {m: base.get(m, 0) * (1 + changes.get(m, 0) / 100) for m in MATERIALS}; base_plan = build_plan(base, args.get("policy", "hybrid")); new_plan = build_plan(new, args.get("policy", "hybrid")); comparison = {}
         for material in MATERIALS:
@@ -569,9 +569,9 @@ def result_numbers(data: Any) -> set[float]:
 def answer_numbers_are_grounded(answer: str, data: Any) -> bool:
     if not data: return True
     expected = result_numbers(data)
-    for token in re.findall(r"(?<![A-Za-zА-Яа-яЁё])\d+(?:[.,]\d+)?", answer or ""):
+    for token in re.findall(r"(?<![A-Za-zА-Яа-яЁё0-9-])\d+(?:[.,]\d+)?(?![A-Za-zА-Яа-яЁё0-9-])", answer or ""):
         value = float(token.replace(",", "."))
-        if not any(abs(value - candidate) <= 0.011 for candidate in expected): return False
+        if not any(abs(value - candidate) <= max(0.051, abs(candidate) * 0.00001) for candidate in expected): return False
     return True
 
 
@@ -604,6 +604,8 @@ def forced_tool_for_message(message: str, history: list[dict[str, str]] | None =
 def requested_material(message: str) -> str | None:
     normalized = message.lower()
     if re.search(r"\b(ашки|а-шки)\b", normalized): return "A"
+    if re.search(r"\bб\b", normalized): return "B"
+    if re.search(r"\bс\b", normalized): return "C"
     return next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
 
 
@@ -617,7 +619,7 @@ def parse_requirement_details(message: str) -> tuple[dict[str, float], str | Non
     units = {"т": 1000.0, "тонн": 1000.0, "тонны": 1000.0, "kg": 1.0, "кг": 1.0, "г": 0.001, "g": 0.001}
     found_unit: str | None = None
     for material in MATERIALS:
-        match = re.search(rf"(?:материал\s*)?\b{material.lower()}\b\s*(?:[:=]|[-–])?\s*(\d+(?:\.\d+)?)\s*(т|тонн|тонны|кг|kg|г|g)?", normalized)
+        match = re.search(rf"(?:материал\s*)?\b{material.lower()}\b(?:\s+(?:на\s+)?(?:потребность|нужно|нужна|спрос)\s*)?\s*(?:[:=]|[-–])?\s*(\d+(?:\.\d+)?)\s*(т|тонн|тонны|кг|kg|г|g)?", normalized)
         if match:
             unit = match.group(2) or "кг"
             values[material] = float(match.group(1)) * units[unit]
@@ -627,6 +629,15 @@ def parse_requirement_details(message: str) -> tuple[dict[str, float], str | Non
 
 def parse_requirements(message: str) -> dict[str, float]:
     return parse_requirement_details(message)[0]
+
+
+def parse_changes(message: str) -> dict[str, float]:
+    normalized = message.lower().replace(",", ".")
+    changes: dict[str, float] = {}
+    for material in MATERIALS:
+        match = re.search(rf"\b{material.lower()}\b[^%]{{0,45}}?(?:на|рост\w*|выраст\w*|увелич\w*)\s*([+-]?\d+(?:\.\d+)?)\s*%", normalized)
+        if match: changes[material] = float(match.group(1))
+    return changes
 
 
 def mass_basis(message: str) -> str | None:
@@ -684,7 +695,7 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         return {"intent": "EXECUTE_TOOL", "tool_name": "generate_rejection_report", "arguments": {"material_type": material, "include_rework": True, "include_rejected": True}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошен отчёт по браку"}
     if any(word in normalized for word in ("недельный план", "составь план", "построй план", "план производства")):
         requirements = parse_requirements(message); missing = [m for m in MATERIALS if m not in requirements]
-        policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if "концентрац" in normalized else "hybrid" if "hybrid" in normalized else None
+        policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if any(alias in normalized for alias in ("концентрац", "max concentration", "max_concentration")) else "hybrid" if "hybrid" in normalized else None
         missing_fields = [f"requirements.{m}" for m in missing] + ([] if policy else ["policy"])
         if not missing and not mass_basis(message): missing_fields.append("mass_basis")
         if missing_fields:
@@ -702,8 +713,8 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         policies = [p for p, aliases in (("strict_fifo", ("fifo", "strict_fifo")), ("hybrid", ("hybrid",)), ("max_concentration", ("концентрац", "max_concentration"))) if any(alias in normalized for alias in aliases)] or list(POLICIES)
         return {"intent": "EXECUTE_TOOL", "tool_name": "compare_allocation_policies", "arguments": {"requirements": requirements, "policies": policies, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.96, "reason": "Указаны потребность и стратегии"}
     if any(word in normalized for word in ("сценар", "смоделируй", "изменение спроса", "что будет, если", "рост")):
-        changes = {material.upper(): float(value) for material, value in re.findall(r"\b([abc])\b\s*(?:на\s*)?([+-]?\d+(?:[.,]\d+)?)\s*%", normalized)}
-        policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if "концентрац" in normalized else "hybrid" if "hybrid" in normalized else None
+        changes = parse_changes(message)
+        policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if any(alias in normalized for alias in ("концентрац", "max concentration", "max_concentration")) else "hybrid" if "hybrid" in normalized else None
         missing_fields = ([] if changes else ["changes_percent"]) + ([] if policy else ["policy"])
         if missing_fields:
             return {"intent": "CLARIFY", "tool_name": "simulate_requirement_change", "arguments": {"changes_percent": changes}, "missing_fields": missing_fields, "confidence": 0.92, "reason": "Для сценария не хватает процента изменения и политики", "choices": [{"label": "Hybrid", "value": "Смоделируй сценарий с policy hybrid"}, {"label": "Strict FIFO", "value": "Смоделируй сценарий с policy strict_fifo"}]}
@@ -723,17 +734,73 @@ def explanation_tool_for_message(message: str) -> str | None:
     return None
 
 
+def compact_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Keep only the small conversational window needed for an ambiguous request."""
+    compact = []
+    for item in history[-6:]:
+        content = (item.get("content") or "").strip()
+        if content:
+            compact.append({"role": item["role"], "content": content[:700]})
+    return compact
+
+
+def llm_context(history: list[dict[str, str]]) -> str:
+    last_user = next((item["content"] for item in reversed(history) if item.get("role") == "user"), "")
+    return json.dumps({
+        "last_user_request": last_user[:700],
+        "last_requirements": parse_requirements(last_user),
+        "last_material": requested_material(last_user),
+        "last_policy": "strict_fifo" if "fifo" in last_user.lower() else "max_concentration" if "концентрац" in last_user.lower() else "hybrid" if "hybrid" in last_user.lower() else None,
+    }, ensure_ascii=False)
+
+
+def routed_tool_result(message: str, history: list[dict[str, str]]) -> tuple[str, Any, list[dict[str, Any]]] | None:
+    intent = route_intent(message, history)
+    if intent["intent"] != "EXECUTE_TOOL" or not intent.get("tool_name") or not intent.get("arguments"):
+        return None
+    name, args = intent["tool_name"], intent["arguments"]
+    try:
+        data = tool(name, args)
+        trace = [{"tool": name, "arguments": args, "status": "success", "source": "router"}]
+    except Exception as exc:
+        data = {"error": str(exc)}
+        trace = [{"tool": name, "arguments": args, "status": "error", "message": str(exc), "source": "router"}]
+    return name, data, trace
+
+
+def explanation_prompt(message: str, history: list[dict[str, str]], tool_name: str | None = None, data: Any = None) -> tuple[str, list[dict[str, str]]]:
+    system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски, коротко и по делу. Не придумывай числа, партии или статусы. Если ниже есть результат инструмента, объясни именно его простыми словами и отделяй массу сырья от массы активного вещества. Не запускай инструменты и не меняй данные."""
+    if tool_name and data is not None:
+        prompt = f"Запрос пользователя: {message}\nИнструмент {tool_name} уже выполнен. Его результат JSON:\n{json.dumps(data, ensure_ascii=False, separators=(',', ':'))[:24000]}"
+    else:
+        prompt = message
+    messages = [{"role": "system", "content": system + "\nСжатый контекст: " + llm_context(history)}]
+    messages.extend(compact_history(history))
+    messages.append({"role": "user", "content": prompt})
+    return system, messages
+
+
 def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, Any, list[dict[str, Any]]] | None:
     key = os.getenv("LLM_API_KEY")
     if not key: return None
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     intent = route_intent(message, history)
     if intent["intent"] == "CLARIFY": return "assistant", clarification_text(intent), {"choices": intent.get("choices", [])}, []
+    routed = routed_tool_result(message, history)
+    if routed or intent["intent"] in ("EXPLAIN_TOOL", "GENERAL_HELP"):
+        name, data, trace = routed or (None, None, [])
+        _, messages = explanation_prompt(message, history, name, data)
+        body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_EXPLAIN_MAX_TOKENS", "650")), "messages": messages}
+        req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response: result = json.load(response)
+        content = (result["choices"][0]["message"].get("content") or "").strip()
+        if data and not answer_numbers_are_grounded(content, data): content = summarize_tool_result(data)
+        return "llm", content or summarize_tool_result(data), data, trace
     explanation_tool = explanation_tool_for_message(message)
     system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски. Все данные и расчёты получай только через инструменты. Не придумывай партии и числа. После tool call объясни результат простыми словами, отделяй массу сырья от массы активного вещества. Preview-план не подтверждай сам. Всегда заверши ответ коротким понятным текстом; пустой ответ запрещён."""
     if explanation_tool: system += f" Пользователь просит объяснить инструмент {explanation_tool}. {registry_explanation(explanation_tool)} Расскажи назначение, когда он нужен, параметры и результат. Не запускай инструмент и не выдумывай поля. Ответ краткий — до 120 слов."
-    messages = [{"role": "system", "content": system}]
-    messages.extend({"role": x["role"], "content": x["content"]} for x in history if x.get("role") in ("user", "assistant") and x.get("content"))
+    messages = [{"role": "system", "content": system + "\nСжатый контекст: " + llm_context(history)}]
+    messages.extend(compact_history(history))
     messages.append({"role": "user", "content": message})
     trace: list[dict[str, Any]] = []
     last_data: Any = None
@@ -794,11 +861,34 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
         yield {"type": "done", "response": {"mode": "offline", "answer": answer, "result": data, "tool_calls": trace}}
         return
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    routed = routed_tool_result(message, history)
+    if routed or intent["intent"] in ("EXPLAIN_TOOL", "GENERAL_HELP"):
+        name, data, trace = routed or (None, None, [])
+        if trace:
+            yield {"type": "tool", "tool": trace[-1]["tool"], "status": trace[-1]["status"]}
+        _, messages = explanation_prompt(message, history, name, data)
+        body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_EXPLAIN_MAX_TOKENS", "650")), "messages": messages, "stream": True}
+        req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+        answer_parts: list[str] = []
+        with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line.startswith("data:"): continue
+                payload = line[5:].strip()
+                if payload == "[DONE]": break
+                delta = json.loads(payload).get("choices", [{}])[0].get("delta", {}).get("content") or ""
+                if delta: answer_parts.append(delta)
+        answer = "".join(answer_parts).strip()
+        if data and not answer_numbers_are_grounded(answer, data): answer = summarize_tool_result(data)
+        answer = answer or summarize_tool_result(data)
+        yield {"type": "token", "text": answer}
+        yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": data, "tool_calls": trace}}
+        return
     explanation_tool = explanation_tool_for_message(message)
     system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски. Все данные и расчёты получай только через инструменты. Не придумывай партии и числа. После tool call объясни результат простыми словами, отделяй массу сырья от массы активного вещества. Preview-план не подтверждай сам. Всегда заверши ответ коротким понятным текстом; пустой ответ запрещён."""
     if explanation_tool: system += f" Пользователь просит объяснить инструмент {explanation_tool}. {registry_explanation(explanation_tool)} Расскажи назначение, когда он нужен, параметры и результат. Не запускай инструмент и не выдумывай поля. Ответ краткий — до 120 слов."
-    messages = [{"role": "system", "content": system}]
-    messages.extend({"role": x["role"], "content": x["content"]} for x in history if x.get("role") in ("user", "assistant") and x.get("content"))
+    messages = [{"role": "system", "content": system + "\nСжатый контекст: " + llm_context(history)}]
+    messages.extend(compact_history(history))
     messages.append({"role": "user", "content": message})
     trace: list[dict[str, Any]] = []
     last_data: Any = None
