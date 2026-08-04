@@ -1,0 +1,57 @@
+name: raw-material-ai
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: raw_material
+      POSTGRES_USER: raw_material
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-raw-material-local}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raw_material -d raw_material"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    ports:
+      - "8009:8009"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://raw_material:${POSTGRES_PASSWORD:-raw-material-local}@db:5432/raw_material
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.vsellm.ru/v1}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-5-nano}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_MAX_TOOL_ROUNDS: ${LLM_MAX_TOOL_ROUNDS:-2}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-700}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  data-generator:
+    build:
+      context: .
+      dockerfile: services/data-generator/Dockerfile
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
