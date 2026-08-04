@@ -1,8 +1,12 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import app
+from fastapi import HTTPException
+from starlette.requests import Request
 
 
 def test_registry_drives_all_schemas():
@@ -26,6 +30,35 @@ def test_explanations_never_route_to_execution():
         assert intent["intent"] == "EXPLAIN_TOOL"
         assert intent["tool_name"] == tool_name
         assert app.forced_tool_for_message(message) is None
+
+
+def test_contextual_followups_keep_the_business_intent():
+    inventory_history = [{"role": "user", "content": "Покажи остатки по A"}, {"role": "assistant", "content": "Сводка по остаткам"}]
+    followup = app.route_intent("А теперь по B", inventory_history)
+    assert followup["intent"] == "EXECUTE_TOOL"
+    assert followup["tool_name"] == "get_inventory_summary"
+    assert followup["arguments"]["material_type"] == "B"
+    plan_history = [{"role": "user", "content": "Построй план A 3000 кг активного вещества B 2500 кг активного вещества C 1800 кг активного вещества hybrid"}]
+    same_plan = app.route_intent("Сделай такой же, но FIFO", plan_history)
+    assert same_plan["tool_name"] == "build_weekly_plan"
+    assert same_plan["arguments"]["policy"] == "strict_fifo"
+    changed = app.route_intent("Увеличь A на 20%", plan_history)
+    assert changed["tool_name"] == "simulate_requirement_change"
+    assert changed["arguments"]["changes_percent"] == {"A": 20.0}
+
+
+def test_conversational_inventory_and_planning_phrases_are_understood():
+    assert app.route_intent("че по сырью б")["tool_name"] == "get_inventory_summary"
+    assert app.route_intent("сколько у нас вообще осталось ашки")["arguments"]["material_type"] == "A"
+    assert app.route_intent("мы неделю вытянем по A 3000 кг активного вещества?")["tool_name"] == "check_material_deficit"
+    assert app.route_intent("где больше всего потерь")["tool_name"] == "get_inventory_summary"
+    assert app.route_intent("Сделай отчёт по отклонениям B")["tool_name"] == "generate_rejection_report"
+
+
+def test_final_answer_numbers_must_be_grounded():
+    result = {"available_active_mass_kg": 2800.0, "deficit_active_mass_kg": 200.0}
+    assert app.answer_numbers_are_grounded("Доступно 2800 кг, дефицит 200 кг.", result)
+    assert not app.answer_numbers_are_grounded("Доступно 3000 кг, дефицита нет.", result)
 
 
 def test_plan_requires_explicit_inputs_and_policy():
@@ -70,3 +103,26 @@ def test_rejection_report_matches_derived_quality(monkeypatch, tmp_path):
     report = app.tool("generate_rejection_report", {"material_type": "A", "include_rework": True, "include_rejected": True})
     assert {row["batch_id"] for row in report["batches"]} == {"A-REWORK"}
     assert report["meta"]["units"]["mass"] == "kg_raw"
+
+
+def _auth_request(user_id: str, token: str) -> Request:
+    return Request({"type": "http", "headers": [(b"authorization", f"Bearer {token}".encode())], "method": "POST", "path": "/"})
+
+
+def test_preview_explains_selection_and_rejects_stale_confirmation(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DB_PATH", str(tmp_path / "stale.db"))
+    monkeypatch.setattr(app, "DATABASE_URL", "sqlite:///stale.db")
+    app.init_db()
+    user_id = "audit-user"
+    con = app.db(); con.execute("INSERT INTO users VALUES (?,?,?,?,?,?)", (user_id, "audit", app.hash_password("password"), 0, 0, "2026-08-05T00:00:00")); token = app.session_token(con, user_id); con.commit(); con.close()
+    request = _auth_request(user_id, token)
+    payload = app.RequirementIn(requirements={"A": 100}, policy="hybrid", allow_rework=True)
+    first = app.plan_preview(payload, request)
+    item = first["materials"]["A"]["items"][0]
+    assert {"selection_rank", "selection_reason", "arrival_date", "concentration_percent", "active_mass_received_kg"} <= set(item)
+    second = app.plan_preview(payload, request)
+    assert app.plan_confirm(first["plan_id"], payload, request)["status"] == "confirmed"
+    with pytest.raises(HTTPException) as error:
+        app.plan_confirm(second["plan_id"], payload, request)
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "STALE_PLAN"

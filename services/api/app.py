@@ -150,7 +150,7 @@ def init_db() -> None:
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
     );
-    CREATE TABLE IF NOT EXISTS plan_owners (plan_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'preview', created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE);
+    CREATE TABLE IF NOT EXISTS plan_owners (plan_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'preview', created_at TEXT NOT NULL, preview_data_version INTEGER NOT NULL DEFAULT 1, FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS chats (
       chat_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL,
@@ -165,6 +165,12 @@ def init_db() -> None:
     INSERT INTO settings(key, value) VALUES ('registration_open', '1') ON CONFLICT(key) DO NOTHING;
     INSERT INTO settings(key, value) VALUES ('data_version', '1') ON CONFLICT(key) DO NOTHING;
     """)
+    if DATABASE_URL.startswith("postgres"):
+        column_exists = con.execute("SELECT 1 FROM information_schema.columns WHERE table_name='plan_owners' AND column_name='preview_data_version'").fetchone()
+    else:
+        column_exists = next((row for row in con.execute("PRAGMA table_info(plan_owners)").fetchall() if row[1] == "preview_data_version"), None)
+    if not column_exists:
+        con.execute("ALTER TABLE plan_owners ADD COLUMN preview_data_version INTEGER NOT NULL DEFAULT 1")
     for material, values in DEFAULT_RULES.items():
         con.execute("INSERT INTO quality_rules VALUES (?,?,?,?,?,?) ON CONFLICT(material_type) DO NOTHING", (material, *values))
         con.execute("INSERT INTO requirements VALUES (?,?) ON CONFLICT(material_type) DO NOTHING", (material, 3000.0))
@@ -421,15 +427,23 @@ def build_plan(requirements: dict[str, float], policy: str = "hybrid", allow_rew
     for material in MATERIALS:
         required = max(0.0, float(requirements.get(material, 0)))
         need = required; items = []; available = 0.0
-        for row in sort_batches(by_material[material], policy, allow_rework):
+        for selection_rank, row in enumerate(sort_batches(by_material[material], policy, allow_rework), 1):
             factor = row["concentration_percent"] / 100 * row["quality"]["recovery_factor"]
             capacity = row["remaining_raw_mass_kg"] * factor; available += capacity
             if need <= 1e-9: continue
             active = min(need, capacity); raw = active / factor if factor else 0
-            items.append({"batch_id": row["batch_id"], "status": row["quality"]["status"], "raw_mass_used_kg": round(raw, 3), "active_mass_kg": round(active, 3), "loss_kg": round(raw * row["concentration_percent"] / 100 * (1 - row["quality"]["recovery_factor"]), 3)})
+            if policy == "strict_fifo":
+                selection_reason = f"Самая ранняя доступная {row['quality']['status']}-партия по FIFO"
+            elif policy == "max_concentration":
+                selection_reason = f"Максимальная концентрация среди доступных {row['quality']['status']}-партий"
+            elif row["quality"]["status"] == "GOOD":
+                selection_reason = "GOOD-партия выбрана по FIFO до использования REWORK"
+            else:
+                selection_reason = "REWORK-партия выбрана после GOOD по убыванию концентрации"
+            items.append({"batch_id": row["batch_id"], "status": row["quality"]["status"], "selection_rank": selection_rank, "selection_reason": selection_reason, "arrival_date": row["arrival_date"], "concentration_percent": row["concentration_percent"], "raw_mass_used_kg": round(raw, 3), "active_mass_kg": round(active, 3), "active_mass_received_kg": round(active, 3), "loss_kg": round(raw * row["concentration_percent"] / 100 * (1 - row["quality"]["recovery_factor"]), 3)})
             need -= active
         covered = required - max(0, need)
-        result["materials"][material] = {"required_active_mass_kg": round(required, 3), "available_active_mass_kg": round(available, 3), "covered_active_mass_kg": round(covered, 3), "deficit_active_mass_kg": round(max(0, need), 3), "coverage_percent": round(covered / required * 100, 2) if required else 100.0, "items": items, "raw_mass_used_kg": round(sum(i["raw_mass_used_kg"] for i in items), 3), "loss_kg": round(sum(i["loss_kg"] for i in items), 3)}
+        result["materials"][material] = {"required_active_mass_kg": round(required, 3), "available_active_mass_kg": round(available, 3), "covered_active_mass_kg": round(covered, 3), "deficit_active_mass_kg": round(max(0, need), 3), "coverage_percent": round(covered / required * 100, 2) if required else 100.0, "items": items, "raw_mass_used_kg": round(sum(i["raw_mass_used_kg"] for i in items), 3), "loss_kg": round(sum(i["loss_kg"] for i in items), 3), "selection_explanation": f"Стратегия {policy}; отобрано партий: {len(items)}"}
         if need > 1e-9: result["warnings"].append(f"Дефицит материала {material}: {need:.3f} кг активного вещества")
     return result
 
@@ -456,8 +470,10 @@ def tool(name: str, args: dict[str, Any]) -> Any:
         material = args.get("material_type"); rows = [batch_dict(r) for r in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close(); summary = {}
         for row in rows:
             key = f'{row["material_type"]}:{row["quality"]["status"]}' if args.get("group_by", "material_and_status") == "material_and_status" else row["material_type"]
-            item = summary.setdefault(key, {"material_type": row["material_type"], "status": row["quality"]["status"], "batch_count": 0, "raw_mass_kg": 0, "theoretical_active_mass_kg": 0, "available_active_mass_kg": 0})
-            item["batch_count"] += 1; item["raw_mass_kg"] += row["remaining_raw_mass_kg"]; item["theoretical_active_mass_kg"] += row["theoretical_active_mass_kg"]; item["available_active_mass_kg"] += row["available_active_mass_kg"]
+            item = summary.setdefault(key, {"material_type": row["material_type"], "status": row["quality"]["status"], "batch_count": 0, "raw_mass_kg": 0, "theoretical_active_mass_kg": 0, "available_active_mass_kg": 0, "recovery_loss_active_mass_kg": 0})
+            remaining_theoretical_active = row["remaining_raw_mass_kg"] * row["concentration_percent"] / 100
+            item["batch_count"] += 1; item["raw_mass_kg"] += row["remaining_raw_mass_kg"]; item["theoretical_active_mass_kg"] += remaining_theoretical_active; item["available_active_mass_kg"] += row["available_active_mass_kg"]
+            item["recovery_loss_active_mass_kg"] += remaining_theoretical_active - row["available_active_mass_kg"]
         return {"groups": list(summary.values()), "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"material_type": material, "group_by": args.get("group_by", "material_and_status")})}
     if name == "build_weekly_plan":
         con.close(); return build_plan(args.get("requirements") or requirements_default(), args.get("policy", "hybrid"), args.get("allow_rework", True))
@@ -468,7 +484,11 @@ def tool(name: str, args: dict[str, Any]) -> Any:
     if name == "generate_rejection_report":
         material = args.get("material_type"); rows = [batch_dict(r) for r in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close(); statuses = set([x for x, enabled in (("REWORK", args.get("include_rework", True)), ("REJECTED", args.get("include_rejected", True))) if enabled]); selected = [r for r in rows if r["quality"]["status"] in statuses]; return {"report_id": str(uuid.uuid4()), "batches": selected, "total_raw_mass_kg": sum(r["remaining_raw_mass_kg"] for r in selected), "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
     if name == "simulate_requirement_change":
-        con.close(); base = args.get("base_requirements") or requirements_default(); changes = args.get("changes_percent") or {}; new = {m: base.get(m, 0) * (1 + changes.get(m, 0) / 100) for m in MATERIALS}; return {"base": build_plan(base, args.get("policy", "hybrid")), "new": build_plan(new, args.get("policy", "hybrid")), "new_requirements": new, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
+        con.close(); base = args.get("base_requirements") or requirements_default(); changes = args.get("changes_percent") or {}; new = {m: base.get(m, 0) * (1 + changes.get(m, 0) / 100) for m in MATERIALS}; base_plan = build_plan(base, args.get("policy", "hybrid")); new_plan = build_plan(new, args.get("policy", "hybrid")); comparison = {}
+        for material in MATERIALS:
+            before = base_plan["materials"][material]; after = new_plan["materials"][material]; required = float(base.get(material, 0) or 0); safe_growth = max(0.0, (before["available_active_mass_kg"] / required - 1) * 100) if required else 0.0
+            comparison[material] = {"base_deficit_active_mass_kg": before["deficit_active_mass_kg"], "new_deficit_active_mass_kg": after["deficit_active_mass_kg"], "deficit_delta_active_mass_kg": round(after["deficit_active_mass_kg"] - before["deficit_active_mass_kg"], 3), "base_rework_batches": sum(item["status"] == "REWORK" for item in before["items"]), "new_rework_batches": sum(item["status"] == "REWORK" for item in after["items"]), "safe_growth_percent": round(safe_growth, 2)}
+        return {"base": base_plan, "new": new_plan, "new_requirements": new, "comparison": comparison, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
     con.close(); raise ValueError("unknown tool")
 
 
@@ -515,7 +535,7 @@ def summarize_tool_result(data: Any) -> str:
             return "Остатков по текущему фильтру не найдено."
         lines = ["Сводка по остаткам:"]
         for item in groups:
-            lines.append(f"{item['material_type']} / {item['status']}: {item['batch_count']} партий, {item['raw_mass_kg']:.1f} кг сырья, {item['available_active_mass_kg']:.1f} кг активного вещества")
+            lines.append(f"{item['material_type']} / {item['status']}: {item['batch_count']} партий, {item['raw_mass_kg']:.1f} кг сырья, {item['available_active_mass_kg']:.1f} кг активного вещества, потери восстановления {item.get('recovery_loss_active_mass_kg', 0):.1f} кг")
         return "\n".join(lines)
     if isinstance(data, dict) and data.get("batch_id"):
         quality = data.get("quality", {})
@@ -527,7 +547,32 @@ def summarize_tool_result(data: Any) -> str:
         return "\n".join(lines)
     if isinstance(data, dict) and data.get("batches") is not None:
         return f"Отчёт сформирован: {len(data['batches'])} проблемных партий, {data.get('total_raw_mass_kg', 0):.1f} кг остатка к решению."
+    if isinstance(data, dict) and data.get("comparison"):
+        lines = ["Сценарий рассчитан:"]
+        for material, item in data["comparison"].items():
+            lines.append(f"{material}: дефицит {item['base_deficit_active_mass_kg']:.1f} → {item['new_deficit_active_mass_kg']:.1f} кг активного вещества; безопасный рост {item['safe_growth_percent']:.1f}%")
+        return "\n".join(lines)
     return "Расчёт завершён. Подробности доступны в результате инструмента."
+
+
+def result_numbers(data: Any) -> set[float]:
+    numbers: set[float] = set()
+    if isinstance(data, dict):
+        for value in data.values(): numbers.update(result_numbers(value))
+    elif isinstance(data, (int, float)) and not isinstance(data, bool):
+        numbers.add(round(float(data), 6))
+    elif isinstance(data, list):
+        for value in data: numbers.update(result_numbers(value))
+    return numbers
+
+
+def answer_numbers_are_grounded(answer: str, data: Any) -> bool:
+    if not data: return True
+    expected = result_numbers(data)
+    for token in re.findall(r"(?<![A-Za-zА-Яа-яЁё])\d+(?:[.,]\d+)?", answer or ""):
+        value = float(token.replace(",", "."))
+        if not any(abs(value - candidate) <= 0.011 for candidate in expected): return False
+    return True
 
 
 def registry_explanation(tool_name: str) -> str:
@@ -536,8 +581,8 @@ def registry_explanation(tool_name: str) -> str:
     return f"{spec['title']} ({tool_name}) — {spec['description']} Параметры: {params}. Инструмент read-only: производственные данные не изменяет."
 
 
-def forced_tool_for_message(message: str) -> tuple[str, dict[str, Any]] | None:
-    intent = route_intent(message)
+def forced_tool_for_message(message: str, history: list[dict[str, str]] | None = None) -> tuple[str, dict[str, Any]] | None:
+    intent = route_intent(message, history)
     if intent["intent"] != "EXECUTE_TOOL": return None
     if intent.get("tool_name") and intent.get("arguments"):
         return intent["tool_name"], intent["arguments"]
@@ -558,6 +603,7 @@ def forced_tool_for_message(message: str) -> tuple[str, dict[str, Any]] | None:
 
 def requested_material(message: str) -> str | None:
     normalized = message.lower()
+    if re.search(r"\b(ашки|а-шки)\b", normalized): return "A"
     return next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
 
 
@@ -599,7 +645,7 @@ def clarification_text(intent: dict[str, Any]) -> str:
     return "Уточните, пожалуйста: " + ", ".join(missing or ["параметры запроса"]) + "."
 
 
-def route_intent(message: str) -> dict[str, Any]:
+def route_intent(message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
     normalized = message.lower()
     explanation = explanation_tool_for_message(message)
     if explanation:
@@ -607,6 +653,19 @@ def route_intent(message: str) -> dict[str, Any]:
     if any(word in normalized for word in ("открой обзор", "открой партии", "открой план", "открой отчёт", "открой отчет", "открой ассистент")):
         target = "data" if "парт" in normalized else "planning" if "план" in normalized else "reports" if "отч" in normalized else "assistant" if "ассист" in normalized else "overview"
         return {"intent": "NAVIGATE", "tool_name": None, "arguments": {"page": target}, "missing_fields": [], "confidence": 0.98, "reason": "Явная команда навигации"}
+    context = "\n".join(item.get("content", "") for item in (history or [])[-8:]).lower()
+    previous_user = next((item.get("content", "") for item in reversed(history or []) if item.get("role") == "user"), "")
+    previous_requirements = parse_requirements(previous_user)
+    if history and requested_material(message) and any(word in normalized for word in ("а теперь", "теперь", "ещё", "еще")) and any(word in context for word in ("остат", "склад", "запас", "inventory")):
+        return {"intent": "EXECUTE_TOOL", "tool_name": "get_inventory_summary", "arguments": {"material_type": requested_material(message), "group_by": "material_and_status"}, "missing_fields": [], "confidence": 0.91, "reason": "Материал уточнён по контексту предыдущего запроса"}
+    if history and previous_requirements and set(previous_requirements) == set(MATERIALS) and any(word in normalized for word in ("такой же", "как до этого", "как раньше", "но fifo", "но hybrid", "тоже")) and "план" in context:
+        policy = "strict_fifo" if "fifo" in normalized else "max_concentration" if "концентрац" in normalized else "hybrid"
+        return {"intent": "EXECUTE_TOOL", "tool_name": "build_weekly_plan", "arguments": {"requirements": previous_requirements, "policy": policy, "allow_rework": True, "mass_basis": mass_basis(previous_user) or "active_mass_kg"}, "missing_fields": [], "confidence": 0.9, "reason": "Параметры плана унаследованы из контекста"}
+    if history and previous_requirements and "план" in context and any(word in normalized for word in ("%", "процент", "больше", "увеличь", "рост")):
+        changes = {material.upper(): float(value) for material, value in re.findall(r"\b([abc])\b\s*(?:на\s*)?([+-]?\d+(?:[.,]\d+)?)\s*%", normalized)}
+        policy = "strict_fifo" if "fifo" in context else "max_concentration" if "концентрац" in context else "hybrid"
+        if changes:
+            return {"intent": "EXECUTE_TOOL", "tool_name": "simulate_requirement_change", "arguments": {"base_requirements": previous_requirements, "changes_percent": changes, "policy": policy}, "missing_fields": [], "confidence": 0.88, "reason": "Сценарий изменения унаследовал базовую потребность из контекста"}
     material = requested_material(message)
     batch_match = re.search(r"\b([abc]-\d+)\b", normalized)
     if batch_match and any(word in normalized for word in ("детал", "покажи", "карточ")):
@@ -615,11 +674,11 @@ def route_intent(message: str) -> dict[str, Any]:
         return {"intent": "EXECUTE_TOOL", "tool_name": "check_batch_quality", "arguments": {"batch_id": batch_match.group(1).upper()}, "missing_fields": [], "confidence": 0.99, "reason": "Явно указана партия и команда проверки"}
     if any(word in normalized for word in ("классифиц", "классификац")) and any(word in normalized for word in ("запусти", "сделай", "проведи", "покажи", "выполни")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "classify_batches", "arguments": {"material_type": material, "only_unclassified": False}, "missing_fields": [], "confidence": 0.96, "reason": "Явно запрошена классификация партий"}
-    if any(word in normalized for word in ("остат", "склад", "запас", "сырь")) and any(word in normalized for word in ("покажи", "покаж", "дай", "проверь", "посчитай", "сколько")):
-        if not material and not any(word in normalized for word in ("все", "всем", "общ")):
+    if any(word in normalized for word in ("остат", "остал", "склад", "запас", "сырь", "че по", "потер")) and any(word in normalized for word in ("покажи", "покаж", "дай", "проверь", "посчитай", "сколько", "че по", "где")):
+        if not material and not any(word in normalized for word in ("все", "всем", "общ", "где")):
             return {"intent": "CLARIFY", "tool_name": "get_inventory_summary", "arguments": {}, "missing_fields": ["material_type"], "confidence": 0.95, "reason": "Нужно выбрать материал или все материалы", "choices": material_choices("Покажи остатки")}
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_inventory_summary", "arguments": {"material_type": material, "group_by": "material_and_status"}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошена сводка остатков"}
-    if any(word in normalized for word in ("брак", "отбрак", "доработ")) and any(word in normalized for word in ("покажи", "сделай", "сформируй", "отчёт", "отчет")):
+    if any(word in normalized for word in ("брак", "отбрак", "доработ", "проблемн", "отклон")) and any(word in normalized for word in ("покажи", "сделай", "сформируй", "отчёт", "отчет", "парти")):
         if not material and not any(word in normalized for word in ("все", "всем")):
             return {"intent": "CLARIFY", "tool_name": "generate_rejection_report", "arguments": {}, "missing_fields": ["material_type"], "confidence": 0.95, "reason": "Нужно выбрать материал или все материалы", "choices": material_choices("Покажи отчёт по браку")}
         return {"intent": "EXECUTE_TOOL", "tool_name": "generate_rejection_report", "arguments": {"material_type": material, "include_rework": True, "include_rejected": True}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошен отчёт по браку"}
@@ -631,7 +690,7 @@ def route_intent(message: str) -> dict[str, Any]:
         if missing_fields:
             return {"intent": "CLARIFY", "tool_name": "build_weekly_plan", "arguments": {"requirements": requirements}, "missing_fields": missing_fields, "confidence": 0.94, "reason": "Для preview-плана не хватает обязательных вводных", "choices": [{"label": "Hybrid", "value": "Построй недельный план с policy hybrid"}, {"label": "Strict FIFO", "value": "Построй недельный план с policy strict_fifo"}, {"label": "Max concentration", "value": "Построй недельный план с policy max_concentration"}]}
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_weekly_plan", "arguments": {"requirements": requirements, "policy": policy, "allow_rework": True, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.98, "reason": "Все обязательные параметры preview-плана указаны"}
-    if any(word in normalized for word in ("дефицит", "хватит", "потребн")) and any(word in normalized for word in ("проверь", "посчитай", "есть", "хватит")):
+    if any(word in normalized for word in ("дефицит", "хватит", "потребн", "вытян", "достат")) and any(word in normalized for word in ("проверь", "посчитай", "есть", "хватит", "вытян", "достат")):
         requirements = parse_requirements(message)
         if not requirements: return {"intent": "CLARIFY", "tool_name": "check_material_deficit", "arguments": {}, "missing_fields": ["requirements"], "confidence": 0.9, "reason": "Нужна потребность в кг активного вещества"}
         if not mass_basis(message): return {"intent": "CLARIFY", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements}, "missing_fields": ["mass_basis"], "confidence": 0.94, "reason": "Нужно различить массу сырья и активного вещества"}
@@ -642,8 +701,8 @@ def route_intent(message: str) -> dict[str, Any]:
         if not mass_basis(message): return {"intent": "CLARIFY", "tool_name": "compare_allocation_policies", "arguments": {"requirements": requirements}, "missing_fields": ["mass_basis"], "confidence": 0.94, "reason": "Нужно различить массу сырья и активного вещества"}
         policies = [p for p, aliases in (("strict_fifo", ("fifo", "strict_fifo")), ("hybrid", ("hybrid",)), ("max_concentration", ("концентрац", "max_concentration"))) if any(alias in normalized for alias in aliases)] or list(POLICIES)
         return {"intent": "EXECUTE_TOOL", "tool_name": "compare_allocation_policies", "arguments": {"requirements": requirements, "policies": policies, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.96, "reason": "Указаны потребность и стратегии"}
-    if any(word in normalized for word in ("сценар", "смоделируй", "изменение спроса", "что будет, если")):
-        changes = {material: float(value) for material, value in re.findall(r"\b([abc])\b\s*(?:на\s*)?([+-]?\d+(?:[.,]\d+)?)\s*%", normalized)}
+    if any(word in normalized for word in ("сценар", "смоделируй", "изменение спроса", "что будет, если", "рост")):
+        changes = {material.upper(): float(value) for material, value in re.findall(r"\b([abc])\b\s*(?:на\s*)?([+-]?\d+(?:[.,]\d+)?)\s*%", normalized)}
         policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if "концентрац" in normalized else "hybrid" if "hybrid" in normalized else None
         missing_fields = ([] if changes else ["changes_percent"]) + ([] if policy else ["policy"])
         if missing_fields:
@@ -668,7 +727,7 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
     key = os.getenv("LLM_API_KEY")
     if not key: return None
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    intent = route_intent(message)
+    intent = route_intent(message, history)
     if intent["intent"] == "CLARIFY": return "assistant", clarification_text(intent), {"choices": intent.get("choices", [])}, []
     explanation_tool = explanation_tool_for_message(message)
     system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски. Все данные и расчёты получай только через инструменты. Не придумывай партии и числа. После tool call объясни результат простыми словами, отделяй массу сырья от массы активного вещества. Preview-план не подтверждай сам. Всегда заверши ответ коротким понятным текстом; пустой ответ запрещён."""
@@ -691,14 +750,14 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
             content = (msg.get("content") or "").strip() or (registry_explanation(explanation_tool) if explanation_tool else "Я могу показать фактические данные через инструменты, но для этого нужна явная команда на расчёт.")
             return "llm", content, None, trace
         if not calls:
-            forced = forced_tool_for_message(message) if not forced_used else None
+            forced = forced_tool_for_message(message, history) if not forced_used else None
             if forced:
                 forced_used = True
                 name, args = forced; call_id = "forced-" + uuid.uuid4().hex
                 try:
-                    last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success"}); tool_result = last_data
+                    last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success", "source": "forced"}); tool_result = last_data
                 except Exception as exc:
-                    trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc)}); tool_result = {"error": str(exc)}
+                    trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc), "source": "forced"}); tool_result = {"error": str(exc)}
                 messages.append({"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]})
                 messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": json.dumps(tool_result, ensure_ascii=False)})
                 continue
@@ -707,22 +766,23 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
                 retry_used = True
                 messages.append({"role": "user", "content": "Сформулируй короткий содержательный ответ на исходный вопрос. Не возвращай пустой ответ."})
                 continue
+            if last_data and not answer_numbers_are_grounded(content, last_data): content = summarize_tool_result(last_data)
             return "llm", content or summarize_tool_result(last_data), last_data, trace
         for call in calls:
             name = call["function"]["name"]
             if name not in TOOLS: raise ValueError("unknown tool")
             args = json.loads(call["function"].get("arguments") or "{}")
             try:
-                last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success"})
+                last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success", "source": "model"})
                 tool_result = last_data
             except Exception as exc:
-                trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc)}); tool_result = {"error": str(exc)}
+                trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc), "source": "model"}); tool_result = {"error": str(exc)}
             messages.append({"role": "tool", "tool_call_id": call["id"], "name": name, "content": json.dumps(tool_result, ensure_ascii=False)})
     return "llm", "Не удалось завершить расчёт за допустимое число шагов.", last_data, trace
 
 
 def llm_agent_stream(message: str, history: list[dict[str, str]]):
-    intent = route_intent(message)
+    intent = route_intent(message, history)
     if intent["intent"] == "CLARIFY":
         answer = clarification_text(intent)
         yield {"type": "token", "text": answer}
@@ -764,14 +824,14 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                     yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": None, "tool_calls": []}}
                     return
                 if not calls:
-                    forced = forced_tool_for_message(message) if not forced_used else None
+                    forced = forced_tool_for_message(message, history) if not forced_used else None
                     if forced:
                         forced_used = True
                         name, args = forced; call_id = "forced-" + uuid.uuid4().hex
                         try:
-                            last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success"}); tool_result = last_data
+                            last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success", "source": "forced"}); tool_result = last_data
                         except Exception as exc:
-                            trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc)}); tool_result = {"error": str(exc)}
+                            trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc), "source": "forced"}); tool_result = {"error": str(exc)}
                         messages.append({"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]})
                         messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": json.dumps(tool_result, ensure_ascii=False)})
                         yield {"type": "tool", "tool": name, "status": trace[-1]["status"]}
@@ -781,6 +841,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                         retry_used = True
                         messages.append({"role": "user", "content": "Сформулируй короткий содержательный ответ на исходный вопрос. Не возвращай пустой ответ."})
                         continue
+                    if last_data and not answer_numbers_are_grounded(content, last_data): content = summarize_tool_result(last_data)
                     answer = content or summarize_tool_result(last_data)
                     yield {"type": "token", "text": answer}
                     yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": last_data, "tool_calls": trace}}
@@ -790,9 +851,9 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                     if name not in TOOLS: raise ValueError("unknown tool")
                     args = json.loads(call["function"].get("arguments") or "{}")
                     try:
-                        last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success"}); tool_result = last_data
+                        last_data = tool(name, args); trace.append({"tool": name, "arguments": args, "status": "success", "source": "model"}); tool_result = last_data
                     except Exception as exc:
-                        trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc)}); tool_result = {"error": str(exc)}
+                        trace.append({"tool": name, "arguments": args, "status": "error", "message": str(exc), "source": "model"}); tool_result = {"error": str(exc)}
                     yield {"type": "tool", "tool": name, "status": trace[-1]["status"]}
                     messages.append({"role": "tool", "tool_call_id": call["id"], "name": name, "content": json.dumps(tool_result, ensure_ascii=False)})
                 continue
@@ -806,9 +867,11 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                 text = delta.get("content") or ""
                 if text:
-                    answer_parts.append(text); yield {"type": "token", "text": text}
-            answer = "".join(answer_parts).strip() or summarize_tool_result(last_data)
-            if not answer_parts: yield {"type": "token", "text": answer}
+                    answer_parts.append(text)
+            answer = "".join(answer_parts).strip()
+            if last_data and not answer_numbers_are_grounded(answer, last_data): answer = summarize_tool_result(last_data)
+            answer = answer or summarize_tool_result(last_data)
+            yield {"type": "token", "text": answer}
             yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": last_data, "tool_calls": trace}}
             return
     answer = "Не удалось завершить расчёт за допустимое число шагов."
@@ -1012,16 +1075,20 @@ def import_commit(payload: ImportCommit, request: Request) -> dict[str, int]:
 @app.post("/api/v1/plans/preview")
 def plan_preview(payload: RequirementIn, request: Request) -> Any:
     user = current_user(request); plan_id = str(uuid.uuid4()); plan = build_plan(payload.requirements, payload.policy, payload.allow_rework)
-    con = db(); con.execute("INSERT INTO plan_owners VALUES (?,?,?,?)", (plan_id, user["user_id"], "preview", datetime.utcnow().isoformat())); con.commit(); con.close()
+    con = db(); con.execute("INSERT INTO plan_owners(plan_id,user_id,status,created_at,preview_data_version) VALUES (?,?,?,?,?)", (plan_id, user["user_id"], "preview", datetime.utcnow().isoformat(), plan["meta"]["data_version"])); con.commit(); con.close()
     return {"plan_id": plan_id, **plan}
 
 
 @app.post("/api/v1/plans/{plan_id}/confirm")
 def plan_confirm(plan_id: str, payload: RequirementIn, request: Request) -> Any:
     user = current_user(request)
-    con = db(); owner = con.execute("SELECT status FROM plan_owners WHERE plan_id=? AND user_id=?", (plan_id, user["user_id"])).fetchone()
+    con = db(); owner = con.execute("SELECT status, preview_data_version FROM plan_owners WHERE plan_id=? AND user_id=?", (plan_id, user["user_id"])).fetchone()
     if not owner: con.close(); raise HTTPException(404, "plan not found")
     if owner["status"] != "preview": con.close(); raise HTTPException(409, "plan already confirmed or cancelled")
+    current_version_row = con.execute("SELECT value FROM settings WHERE key='data_version'").fetchone()
+    current_version = int(current_version_row[0]) if current_version_row else 1
+    if int(owner["preview_data_version"]) != current_version:
+        con.close(); raise HTTPException(409, {"code": "STALE_PLAN", "message": "Складские остатки изменились. Пересчитайте план.", "preview_data_version": int(owner["preview_data_version"]), "current_data_version": current_version})
     existing = con.execute("SELECT status FROM plans WHERE plan_id=?", (plan_id,)).fetchone()
     if existing: con.close(); raise HTTPException(409, "plan already confirmed or cancelled")
     plan = build_plan(payload.requirements, payload.policy, payload.allow_rework)
@@ -1029,7 +1096,7 @@ def plan_confirm(plan_id: str, payload: RequirementIn, request: Request) -> Any:
         con.execute("INSERT INTO plans VALUES (?,?,?,?)", (plan_id, "confirmed", json.dumps(plan), datetime.utcnow().isoformat()))
         for item in [i for m in plan["materials"].values() for i in m["items"]]:
             cur = con.execute("UPDATE batches SET remaining_raw_mass_kg=remaining_raw_mass_kg-? WHERE batch_id=? AND remaining_raw_mass_kg>=?", (item["raw_mass_used_kg"], item["batch_id"], item["raw_mass_used_kg"]))
-            if cur.rowcount != 1: raise HTTPException(409, "plan cannot be confirmed against current inventory")
+            if cur.rowcount != 1: raise HTTPException(409, {"code": "STALE_PLAN", "message": "Складские остатки изменились. Пересчитайте план."})
         con.execute("UPDATE plan_owners SET status='confirmed' WHERE plan_id=? AND user_id=? AND status='preview'", (plan_id, user["user_id"]))
         bump_data_version(con); con.commit()
     except HTTPException:
@@ -1067,7 +1134,7 @@ def chat(payload: ChatIn, request: Request) -> Any:
     con.execute("UPDATE chats SET title=? WHERE chat_id=? AND title='Новый чат'", (payload.message.strip()[:80] or "Новый чат", chat_id)); con.commit(); con.close()
     try:
         normalized = payload.message.lower(); explanation = explanation_tool_for_message(payload.message)
-        intent = route_intent(payload.message)
+        intent = route_intent(payload.message, history)
         if intent["intent"] == "CLARIFY":
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": clarification_text(intent), "question": clarification_text(intent), "needs_clarification": True, "choices": intent.get("choices", []), "tool_calls": []}
             con = db(); save_message(con, chat_id, answer["answer"]); con.commit(); con.close(); return answer
@@ -1123,7 +1190,7 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
         response: dict[str, Any] | None = None
         try:
             normalized = payload.message.lower(); explanation = explanation_tool_for_message(payload.message)
-            intent = route_intent(payload.message)
+            intent = route_intent(payload.message, history)
             if intent["intent"] == "CLARIFY":
                 answer = clarification_text(intent)
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": answer, "question": answer, "needs_clarification": True, "choices": intent.get("choices", []), "tool_calls": []}
