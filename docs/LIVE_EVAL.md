@@ -5,22 +5,22 @@ The opt-in evaluation uses 41 difficult requests, including conversational follo
 Latest run on the deployed Compose image:
 
 ```text
-cases: 41
-tool_accuracy: 0.9697
+cases: 42
+tool_accuracy: 0.9706
 route_accuracy: 1.0
-model_tool_selection: null
-model_selection_cases: 0
+model_tool_selection: 1.0
+model_selection_cases: 1
 clarification_cases: 1
 unexpected_tool_count: 0
 answer_non_empty: 1.0
 numeric_grounding: 1.0
-avg_latency_seconds: 5.209
-p50_latency_seconds: 5.501
-p95_latency_seconds: 7.642
-max_latency_seconds: 8.625
+avg_latency_seconds: 5.621
+p50_latency_seconds: 5.65
+p95_latency_seconds: 9.221
+max_latency_seconds: 14.276
 ```
 
-The router handles explicit and context-complete requests before VseLLM; the model remains the fallback for ambiguous natural language. The execution score is 96.97% because one case intentionally returns a clarification instead of executing without a material. The deterministic safety layer prevents unauthorized execution; numeric grounding is enforced after the model response and was 100% in this run.
+The router handles explicit and context-complete requests before VseLLM; the model remains the fallback for ambiguous natural language. The execution score is 97.06% because one case intentionally returns a clarification instead of executing without a material. The deterministic safety layer prevents unauthorized execution; numeric grounding is enforced after the model response and was 100% in this run.
 
 The fast path also sends a compact conversation window and a structured last-request state. The model receives no tool schemas for already-routed requests, so it only explains the verified result instead of spending a round choosing a tool.
 

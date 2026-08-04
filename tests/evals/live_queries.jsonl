@@ -38,4 +38,5 @@
 {"query":"сколько у нас вообще осталось ашки","expected_tool":"get_inventory_summary"}
 {"query":"мы неделю вытянем по A 3000 кг активного вещества?","expected_tool":"check_material_deficit"}
 {"query":"где больше всего потерь","expected_tool":"get_inventory_summary"}
+{"query":"что у нас по запасам","expected_tool":"get_inventory_summary"}
 {"query":"посчитай, что будет при росте потребления B на 12% hybrid","expected_tool":"simulate_requirement_change"}

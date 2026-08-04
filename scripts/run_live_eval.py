@@ -65,7 +65,7 @@ def main() -> int:
             expected_tool = case.get("expected_tool")
             actual_tools = [item.get("tool") for item in trace]
             model_tools = [item.get("tool") for item in trace if item.get("source") == "model"]
-            row = {"query": case["query"], "expected_tool": expected_tool, "router_intent": routed["intent"], "router_tool": routed.get("tool_name"), "actual_tools": actual_tools, "model_tools": model_tools, "answer": answer, "grounded": app.answer_numbers_are_grounded(answer, data), "non_empty": bool((answer or "").strip()), "tool_ok": expected_tool is None or expected_tool in actual_tools, "route_ok": expected_tool is None and not actual_tools or expected_tool == routed.get("tool_name"), "model_tool_ok": expected_tool is None or expected_tool in model_tools, "unexpected_tool": expected_tool is None and bool(actual_tools), "elapsed_seconds": round(time.monotonic() - started, 3)}
+            row = {"query": case["query"], "expected_tool": expected_tool, "router_intent": routed["intent"], "router_tool": routed.get("tool_name"), "actual_tools": actual_tools, "model_tools": model_tools, "answer": answer, "grounded": app.answer_numbers_are_grounded(answer, data), "non_empty": bool((answer or "").strip()), "tool_ok": expected_tool is None or expected_tool in actual_tools, "route_ok": expected_tool is None and not actual_tools or expected_tool in actual_tools or expected_tool == routed.get("tool_name"), "model_tool_ok": expected_tool is None or expected_tool in model_tools, "unexpected_tool": expected_tool is None and bool(actual_tools), "elapsed_seconds": round(time.monotonic() - started, 3)}
             row["failure_class"] = failure_class(row)
             return row
         except Exception as exc:

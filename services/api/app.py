@@ -780,6 +780,13 @@ def explanation_prompt(message: str, history: list[dict[str, str]], tool_name: s
     return system, messages
 
 
+def llm_may_select_tool(message: str) -> bool:
+    normalized = message.lower()
+    if explanation_tool_for_message(message) or any(word in normalized for word in ("как работает", "как устроен", "объясни", "расскажи", "зачем нужен", "игнорируй", "поставь", "без нового запуска", "почему ты выбрал", "просто объясни")):
+        return False
+    return any(word in normalized for word in ("остат", "запас", "сырь", "парт", "брак", "план", "дефиц", "стратег", "потребн", "потер"))
+
+
 def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, Any, list[dict[str, Any]]] | None:
     key = os.getenv("LLM_API_KEY")
     if not key: return None
@@ -787,7 +794,7 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
     intent = route_intent(message, history)
     if intent["intent"] == "CLARIFY": return "assistant", clarification_text(intent), {"choices": intent.get("choices", [])}, []
     routed = routed_tool_result(message, history)
-    if routed or intent["intent"] in ("EXPLAIN_TOOL", "GENERAL_HELP"):
+    if routed or intent["intent"] == "EXPLAIN_TOOL" or (intent["intent"] == "GENERAL_HELP" and not llm_may_select_tool(message)):
         name, data, trace = routed or (None, None, [])
         _, messages = explanation_prompt(message, history, name, data)
         body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_EXPLAIN_MAX_TOKENS", "650")), "messages": messages}
@@ -813,7 +820,7 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
         msg = result["choices"][0]["message"]
         messages.append(msg)
         calls = msg.get("tool_calls") or []
-        if calls and intent["intent"] != "EXECUTE_TOOL":
+        if calls and intent["intent"] == "EXPLAIN_TOOL":
             content = (msg.get("content") or "").strip() or (registry_explanation(explanation_tool) if explanation_tool else "Я могу показать фактические данные через инструменты, но для этого нужна явная команда на расчёт.")
             return "llm", content, None, trace
         if not calls:
@@ -862,7 +869,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
         return
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     routed = routed_tool_result(message, history)
-    if routed or intent["intent"] in ("EXPLAIN_TOOL", "GENERAL_HELP"):
+    if routed or intent["intent"] == "EXPLAIN_TOOL" or (intent["intent"] == "GENERAL_HELP" and not llm_may_select_tool(message)):
         name, data, trace = routed or (None, None, [])
         if trace:
             yield {"type": "tool", "tool": trace[-1]["tool"], "status": trace[-1]["status"]}
@@ -908,7 +915,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                 msg = result["choices"][0]["message"]
                 messages.append(msg)
                 calls = msg.get("tool_calls") or []
-                if calls and intent["intent"] != "EXECUTE_TOOL":
+                if calls and intent["intent"] == "EXPLAIN_TOOL":
                     answer = (msg.get("content") or "").strip() or (registry_explanation(explanation_tool) if explanation_tool else "Я могу показать фактические данные через инструменты, но для этого нужна явная команда на расчёт.")
                     yield {"type": "token", "text": answer}
                     yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": None, "tool_calls": []}}
