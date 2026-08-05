@@ -44,6 +44,25 @@ def failure_class(row: dict[str, object]) -> str | None:
     return "no_tool"
 
 
+def classification_metrics(rows: list[dict[str, object]], predicted_key: str) -> dict[str, object]:
+    labels = sorted({row["expected_label"] for row in rows} | {row[predicted_key] for row in rows})
+    matrix = {expected: {predicted: 0 for predicted in labels} for expected in labels}
+    for row in rows:
+        matrix[row["expected_label"]][row[predicted_key]] += 1
+    per_class = {}
+    for label in labels:
+        tp = matrix[label][label]
+        fp = sum(matrix[expected][label] for expected in labels if expected != label)
+        fn = sum(matrix[label][predicted] for predicted in labels if predicted != label)
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        per_class[label] = {"support": sum(matrix[label].values()), "precision": round(precision, 4), "recall": round(recall, 4), "f1": round(2 * precision * recall / (precision + recall), 4) if precision + recall else 0.0}
+    macro = sum(item["f1"] for item in per_class.values()) / max(1, len(per_class))
+    total = sum(sum(row.values()) for row in matrix.values())
+    accuracy = sum(matrix[label][label] for label in labels) / max(1, total)
+    return {"labels": labels, "macro_f1": round(macro, 4), "micro_f1": round(accuracy, 4), "per_class": per_class, "confusion_matrix": matrix}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default=str(ROOT / "tests" / "evals" / "live_queries.jsonl"))
@@ -65,17 +84,17 @@ def main() -> int:
             expected_tool = case.get("expected_tool")
             actual_tools = [item.get("tool") for item in trace]
             model_tools = [item.get("tool") for item in trace if item.get("source") == "model"]
-            row = {"query": case["query"], "expected_tool": expected_tool, "router_intent": routed["intent"], "router_tool": routed.get("tool_name"), "actual_tools": actual_tools, "model_tools": model_tools, "answer": answer, "grounded": app.answer_numbers_are_grounded(answer, data), "non_empty": bool((answer or "").strip()), "tool_ok": expected_tool is None or expected_tool in actual_tools, "route_ok": expected_tool is None and not actual_tools or expected_tool in actual_tools or expected_tool == routed.get("tool_name"), "model_tool_ok": expected_tool is None or expected_tool in model_tools, "unexpected_tool": expected_tool is None and bool(actual_tools), "elapsed_seconds": round(time.monotonic() - started, 3)}
+            row = {"query": case["query"], "expected_tool": expected_tool, "expected_label": expected_tool or "NO_TOOL", "router_intent": routed["intent"], "router_tool": routed.get("tool_name"), "router_label": routed.get("tool_name") or "NO_TOOL", "actual_tools": actual_tools, "model_tools": model_tools, "predicted_label": actual_tools[-1] if actual_tools else "NO_TOOL", "answer": answer, "grounded": app.answer_numbers_are_grounded(answer, data), "non_empty": bool((answer or "").strip()), "tool_ok": expected_tool is None or expected_tool in actual_tools, "route_ok": expected_tool is None and not actual_tools or expected_tool in actual_tools or expected_tool == routed.get("tool_name"), "model_tool_ok": expected_tool is None or expected_tool in model_tools, "unexpected_tool": expected_tool is None and bool(actual_tools), "elapsed_seconds": round(time.monotonic() - started, 3)}
             row["failure_class"] = failure_class(row)
             return row
         except Exception as exc:
-            return {"query": case["query"], "expected_tool": case.get("expected_tool"), "router_intent": routed["intent"], "router_tool": routed.get("tool_name"), "error": str(exc), "grounded": False, "non_empty": False, "tool_ok": False, "route_ok": False, "model_tool_ok": False, "unexpected_tool": False, "failure_class": "runtime_error", "elapsed_seconds": round(time.monotonic() - started, 3)}
+            return {"query": case["query"], "expected_tool": case.get("expected_tool"), "expected_label": case.get("expected_tool") or "NO_TOOL", "router_intent": routed["intent"], "router_tool": routed.get("tool_name"), "router_label": routed.get("tool_name") or "NO_TOOL", "predicted_label": "NO_TOOL", "error": str(exc), "grounded": False, "non_empty": False, "tool_ok": False, "route_ok": False, "model_tool_ok": False, "unexpected_tool": False, "failure_class": "runtime_error", "elapsed_seconds": round(time.monotonic() - started, 3)}
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
         rows = list(executor.map(evaluate, cases))
     expected = [row for row in rows if row.get("expected_tool")]
     model_cases = [row for row in expected if not row.get("router_tool")]
     latencies = sorted(row["elapsed_seconds"] for row in rows)
-    metrics = {"cases": len(rows), "tool_accuracy": round(sum(row["tool_ok"] for row in expected) / max(1, len(expected)), 4), "execution_accuracy": round(sum(row["tool_ok"] for row in expected) / max(1, len(expected)), 4), "route_accuracy": round(sum(row["route_ok"] for row in expected) / max(1, len(expected)), 4), "router_or_model_accuracy": round(sum(row["route_ok"] for row in expected) / max(1, len(expected)), 4), "model_tool_selection": round(sum(row["model_tool_ok"] for row in model_cases) / len(model_cases), 4) if model_cases else None, "model_selection_cases": len(model_cases), "clarification_cases": sum(row.get("router_intent") == "CLARIFY" for row in expected), "unexpected_tool_count": sum(row["unexpected_tool"] for row in rows), "answer_non_empty": round(sum(row["non_empty"] for row in rows) / max(1, len(rows)), 4), "numeric_grounding": round(sum(row["grounded"] for row in rows) / max(1, len(rows)), 4), "avg_latency_seconds": round(sum(latencies) / max(1, len(latencies)), 3), "p50_latency_seconds": percentile(latencies, 0.50), "p95_latency_seconds": percentile(latencies, 0.95), "max_latency_seconds": max(latencies, default=0.0), "failure_classes": dict(Counter(row["failure_class"] for row in rows if row.get("failure_class")))}
+    metrics = {"cases": len(rows), "tool_accuracy": round(sum(row["tool_ok"] for row in expected) / max(1, len(expected)), 4), "execution_accuracy": round(sum(row["tool_ok"] for row in expected) / max(1, len(expected)), 4), "route_accuracy": round(sum(row["route_ok"] for row in expected) / max(1, len(expected)), 4), "router_or_model_accuracy": round(sum(row["route_ok"] for row in expected) / max(1, len(expected)), 4), "model_tool_selection": round(sum(row["model_tool_ok"] for row in model_cases) / len(model_cases), 4) if model_cases else None, "model_selection_cases": len(model_cases), "clarification_cases": sum(row.get("router_intent") == "CLARIFY" for row in expected), "unexpected_tool_count": sum(row["unexpected_tool"] for row in rows), "answer_non_empty": round(sum(row["non_empty"] for row in rows) / max(1, len(rows)), 4), "numeric_grounding": round(sum(row["grounded"] for row in rows) / max(1, len(rows)), 4), "avg_latency_seconds": round(sum(latencies) / max(1, len(latencies)), 3), "p50_latency_seconds": percentile(latencies, 0.50), "p95_latency_seconds": percentile(latencies, 0.95), "max_latency_seconds": max(latencies, default=0.0), "classification": {"final": classification_metrics(rows, "predicted_label"), "router": classification_metrics(rows, "router_label")}, "failure_classes": dict(Counter(row["failure_class"] for row in rows if row.get("failure_class")))}
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "mode": "live-vsellm", "metrics": metrics, "rows": rows}
     output_dir = Path(args.output_dir); output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "live_latest.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
