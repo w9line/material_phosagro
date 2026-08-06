@@ -30,11 +30,14 @@ if not DATABASE_URL.startswith("postgres"):
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 MATERIALS = ("A", "B", "C")
+MATERIAL_CODE = re.compile(r"^[A-Z][A-Z0-9_-]{0,15}$")
 POLICIES = ("strict_fifo", "max_concentration", "hybrid")
 DEFAULT_RULES = {
     "A": (28.0, 23.0, 1.0, 0.9, 0.0),
     "B": (30.0, 25.0, 1.0, 0.9, 0.0),
     "C": (35.0, 25.0, 1.0, 0.9, 0.0),
+    "D": (32.0, 24.0, 1.0, 0.9, 0.0),
+    "E": (28.0, 22.0, 1.0, 0.9, 0.0),
 }
 
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
@@ -112,6 +115,38 @@ def db() -> Any:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
     return con
+
+
+def material_codes() -> tuple[str, ...]:
+    con = db()
+    rows = con.execute("SELECT material_type FROM quality_rules").fetchall()
+    batches = con.execute("SELECT DISTINCT material_type FROM batches").fetchall()
+    requirements = con.execute("SELECT material_type FROM requirements").fetchall()
+    con.close()
+    codes = {row[0] for row in rows + batches + requirements if row[0]}
+    return tuple(sorted(codes or set(MATERIALS)))
+
+
+def required_material_codes() -> tuple[str, ...]:
+    con = db(); rows = con.execute("SELECT material_type FROM requirements WHERE required_active_mass_kg > 0").fetchall(); con.close()
+    return tuple(row[0] for row in rows) or MATERIALS
+
+
+def ensure_materials(con: Any, codes: list[str] | tuple[str, ...] | set[str]) -> None:
+    known = material_codes_from_connection(con)
+    for code in codes:
+        code = code.upper()
+        if not MATERIAL_CODE.fullmatch(code):
+            raise ValueError(f"invalid material code: {code}")
+        if code not in known:
+            values = DEFAULT_RULES.get(code, DEFAULT_RULES["A"])
+            con.execute("INSERT INTO quality_rules VALUES (?,?,?,?,?,?) ON CONFLICT(material_type) DO NOTHING", (code, *values))
+            con.execute("INSERT INTO requirements VALUES (?,?) ON CONFLICT(material_type) DO NOTHING", (code, 0.0))
+            known.add(code)
+
+
+def material_codes_from_connection(con: Any) -> set[str]:
+    return {row[0] for row in con.execute("SELECT material_type FROM quality_rules").fetchall()}
 
 
 def bump_data_version(con: Any) -> int:
@@ -207,8 +242,8 @@ class BatchIn(BaseModel):
     @classmethod
     def material_ok(cls, value: str) -> str:
         value = value.upper()
-        if value not in MATERIALS:
-            raise ValueError("material_type must be A, B or C")
+        if not MATERIAL_CODE.fullmatch(value):
+            raise ValueError("material_type must start with A-Z and contain up to 16 safe characters")
         return value
 
     @field_validator("batch_id")
@@ -241,9 +276,9 @@ class RequirementIn(BaseModel):
     @field_validator("requirements")
     @classmethod
     def requirements_ok(cls, value: dict[str, float]) -> dict[str, float]:
-        if any(material not in MATERIALS or amount < 0 for material, amount in value.items()):
-            raise ValueError("requirements must contain only non-negative A, B or C values")
-        return {material: float(amount) for material, amount in value.items()}
+        if any(not MATERIAL_CODE.fullmatch(material.upper()) or amount < 0 for material, amount in value.items()):
+            raise ValueError("requirements must contain non-negative values for valid material codes")
+        return {material.upper(): float(amount) for material, amount in value.items()}
 
     @field_validator("policy")
     @classmethod
@@ -383,6 +418,7 @@ def validate_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], lis
 
 def save_batches(rows: list[dict[str, Any]]) -> int:
     con = db()
+    ensure_materials(con, {item["material_type"] for item in rows})
     for item in rows:
         con.execute("INSERT INTO batches VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             item["batch_id"], item["material_type"], item["raw_mass_kg"], item["concentration_percent"],
@@ -422,9 +458,10 @@ def sort_batches(rows: list[dict[str, Any]], policy: str, allow_rework: bool) ->
 def build_plan(requirements: dict[str, float], policy: str = "hybrid", allow_rework: bool = True) -> dict[str, Any]:
     if policy not in POLICIES: raise ValueError(f"policy must be one of {POLICIES}")
     con = db(); all_rows = [batch_dict(r) for r in con.execute("SELECT * FROM batches WHERE remaining_raw_mass_kg > 0").fetchall()]; con.close()
-    by_material = {m: [r for r in all_rows if r["material_type"] == m] for m in MATERIALS}
+    materials = tuple(sorted(set(material_codes()) | set(requirements)))
+    by_material = {m: [r for r in all_rows if r["material_type"] == m] for m in materials}
     result = {"policy": policy, "requirements": requirements, "materials": {}, "warnings": [], "meta": snapshot_meta({"requirements": "kg_active", "raw_mass": "kg_raw", "active_mass": "kg_active"}, {"policy": policy, "allow_rework": allow_rework, "requirements": requirements})}
-    for material in MATERIALS:
+    for material in materials:
         required = max(0.0, float(requirements.get(material, 0)))
         need = required; items = []; available = 0.0
         for selection_rank, row in enumerate(sort_batches(by_material[material], policy, allow_rework), 1):
@@ -484,8 +521,8 @@ def tool(name: str, args: dict[str, Any]) -> Any:
     if name == "generate_rejection_report":
         material = args.get("material_type"); rows = [batch_dict(r) for r in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close(); statuses = set([x for x, enabled in (("REWORK", args.get("include_rework", True)), ("REJECTED", args.get("include_rejected", True))) if enabled]); selected = [r for r in rows if r["quality"]["status"] in statuses]; return {"report_id": str(uuid.uuid4()), "batches": selected, "total_batches": len(selected), "total_raw_mass_kg": sum(r["remaining_raw_mass_kg"] for r in selected), "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
     if name == "simulate_requirement_change":
-        con.close(); base = args.get("base_requirements") or requirements_default(); changes = args.get("changes_percent") or {}; new = {m: base.get(m, 0) * (1 + changes.get(m, 0) / 100) for m in MATERIALS}; base_plan = build_plan(base, args.get("policy", "hybrid")); new_plan = build_plan(new, args.get("policy", "hybrid")); comparison = {}
-        for material in MATERIALS:
+        con.close(); base = args.get("base_requirements") or requirements_default(); changes = args.get("changes_percent") or {}; materials = tuple(sorted(set(material_codes()) | set(base) | set(changes))); new = {m: base.get(m, 0) * (1 + changes.get(m, 0) / 100) for m in materials}; base_plan = build_plan(base, args.get("policy", "hybrid")); new_plan = build_plan(new, args.get("policy", "hybrid")); comparison = {}
+        for material in materials:
             before = base_plan["materials"][material]; after = new_plan["materials"][material]; required = float(base.get(material, 0) or 0); safe_growth = max(0.0, (before["available_active_mass_kg"] / required - 1) * 100) if required else 0.0
             comparison[material] = {"base_deficit_active_mass_kg": before["deficit_active_mass_kg"], "new_deficit_active_mass_kg": after["deficit_active_mass_kg"], "deficit_delta_active_mass_kg": round(after["deficit_active_mass_kg"] - before["deficit_active_mass_kg"], 3), "base_rework_batches": sum(item["status"] == "REWORK" for item in before["items"]), "new_rework_batches": sum(item["status"] == "REWORK" for item in after["items"]), "safe_growth_percent": round(safe_growth, 2)}
         return {"base": base_plan, "new": new_plan, "new_requirements": new, "comparison": comparison, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], args)}
@@ -505,8 +542,8 @@ def local_agent(message: str) -> tuple[str, str, Any, list[dict[str, Any]]]:
         data = tool(name, args)
         return name, summarize_tool_result(data), data, [{"tool": name, "arguments": args, "status": "success"}]
     text = message.lower()
-    match = re.search(r"\b([abc]-\d+)\b", text)
-    old_material = next((m for m in MATERIALS if m.lower() in text and any(x in text for x in ("стар", "ранн"))), None)
+    match = re.search(r"\b([a-z][a-z0-9_-]{0,15}-\d+)\b", text)
+    old_material = next((m for m in material_codes() if m.lower() in text and any(x in text for x in ("стар", "ранн"))), None)
     if old_material:
         con = db(); oldest = con.execute("SELECT batch_id FROM batches WHERE material_type=? ORDER BY arrival_date, created_at, batch_id LIMIT 1", (old_material,)).fetchone(); con.close()
         name, args = ("check_batch_quality", {"batch_id": oldest[0]}) if oldest else ("get_inventory_summary", {"material_type": old_material})
@@ -587,12 +624,12 @@ def forced_tool_for_message(message: str, history: list[dict[str, str]] | None =
     if intent.get("tool_name") and intent.get("arguments"):
         return intent["tool_name"], intent["arguments"]
     normalized = message.lower()
-    material = next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
+    material = next((item for item in material_codes() if re.search(rf"\b{re.escape(item.lower())}\b", normalized)), None)
     if any(word in normalized for word in ("остат", "склад", "сырь")):
         return "get_inventory_summary", {"material_type": material, "group_by": "material_and_status"}
     if any(word in normalized for word in ("брак", "отбрак", "доработ")):
         return "generate_rejection_report", {"material_type": material, "include_rework": True, "include_rejected": True}
-    batch_match = re.search(r"\b([abc]-\d+)\b", normalized)
+    batch_match = re.search(r"\b([a-z][a-z0-9_-]{0,15}-\d+)\b", normalized)
     if batch_match and any(word in normalized for word in ("проверь", "качество", "статус", "парт")):
         return "check_batch_quality", {"batch_id": batch_match.group(1).upper()}
     if any(word in normalized for word in ("недельный план", "составь план", "план производства", "построй план")):
@@ -606,11 +643,11 @@ def requested_material(message: str) -> str | None:
     if re.search(r"\b(ашки|а-шки)\b", normalized): return "A"
     if re.search(r"\bб\b", normalized): return "B"
     if re.search(r"\bс\b", normalized): return "C"
-    return next((item for item in MATERIALS if re.search(rf"\b{item.lower()}\b", normalized)), None)
+    return next((item for item in material_codes() if re.search(rf"\b{re.escape(item.lower())}\b", normalized)), None)
 
 
 def material_choices(prompt: str) -> list[dict[str, str]]:
-    return [{"label": "Все материалы", "value": f"{prompt} по всем материалам"}] + [{"label": item, "value": f"{prompt} по материалу {item}"} for item in MATERIALS]
+    return [{"label": "Все материалы", "value": f"{prompt} по всем материалам"}] + [{"label": item, "value": f"{prompt} по материалу {item}"} for item in material_codes()]
 
 
 def parse_requirement_details(message: str) -> tuple[dict[str, float], str | None]:
@@ -618,7 +655,7 @@ def parse_requirement_details(message: str) -> tuple[dict[str, float], str | Non
     values: dict[str, float] = {}
     units = {"т": 1000.0, "тонн": 1000.0, "тонны": 1000.0, "kg": 1.0, "кг": 1.0, "г": 0.001, "g": 0.001}
     found_unit: str | None = None
-    for material in MATERIALS:
+    for material in material_codes():
         match = re.search(rf"(?:материал\s*)?\b{material.lower()}\b(?:\s+(?:на\s+)?(?:потребность|нужно|нужна|спрос)\s*)?\s*(?:[:=]|[-–])?\s*(\d+(?:\.\d+)?)\s*(т|тонн|тонны|кг|kg|г|g)?", normalized)
         if match:
             unit = match.group(2) or "кг"
@@ -634,7 +671,7 @@ def parse_requirements(message: str) -> dict[str, float]:
 def parse_changes(message: str) -> dict[str, float]:
     normalized = message.lower().replace(",", ".")
     changes: dict[str, float] = {}
-    for material in MATERIALS:
+    for material in material_codes():
         match = re.search(rf"\b{material.lower()}\b[^%]{{0,45}}?(?:на|рост\w*|выраст\w*|увелич\w*)\s*([+-]?\d+(?:\.\d+)?)\s*%", normalized)
         if match: changes[material] = float(match.group(1))
     return changes
@@ -673,12 +710,12 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         policy = "strict_fifo" if "fifo" in normalized else "max_concentration" if "концентрац" in normalized else "hybrid"
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_weekly_plan", "arguments": {"requirements": previous_requirements, "policy": policy, "allow_rework": True, "mass_basis": mass_basis(previous_user) or "active_mass_kg"}, "missing_fields": [], "confidence": 0.9, "reason": "Параметры плана унаследованы из контекста"}
     if history and previous_requirements and "план" in context and any(word in normalized for word in ("%", "процент", "больше", "увеличь", "рост")):
-        changes = {material.upper(): float(value) for material, value in re.findall(r"\b([abc])\b\s*(?:на\s*)?([+-]?\d+(?:[.,]\d+)?)\s*%", normalized)}
+        changes = {material.upper(): float(value) for material, value in re.findall(r"\b([a-z][a-z0-9_-]{0,15})\b\s*(?:на\s*)?([+-]?\d+(?:[.,]\d+)?)\s*%", normalized) if material.upper() in material_codes()}
         policy = "strict_fifo" if "fifo" in context else "max_concentration" if "концентрац" in context else "hybrid"
         if changes:
             return {"intent": "EXECUTE_TOOL", "tool_name": "simulate_requirement_change", "arguments": {"base_requirements": previous_requirements, "changes_percent": changes, "policy": policy}, "missing_fields": [], "confidence": 0.88, "reason": "Сценарий изменения унаследовал базовую потребность из контекста"}
     material = requested_material(message)
-    batch_match = re.search(r"\b([abc]-\d+)\b", normalized)
+    batch_match = re.search(r"\b([a-z][a-z0-9_-]{0,15}-\d+)\b", normalized)
     if batch_match and any(word in normalized for word in ("детал", "покажи", "карточ")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_batch_details", "arguments": {"batch_id": batch_match.group(1).upper()}, "missing_fields": [], "confidence": 0.99, "reason": "Явно запрошены детали партии"}
     if batch_match and any(word in normalized for word in ("проверь", "качество", "статус", "парт")):
@@ -1102,6 +1139,13 @@ def batches(request: Request, material_type: str | None = None) -> list[dict[str
     con = db(); rows = con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material_type else "") + " ORDER BY arrival_date, batch_id", (material_type,) if material_type else ()).fetchall(); con.close(); return [batch_dict(r) for r in rows]
 
 
+@app.get("/api/v1/materials")
+def materials_api(request: Request) -> list[dict[str, Any]]:
+    current_user(request)
+    rule_map, requirement_map = rules(), requirements_default()
+    return [{"material_type": code, "rule": rule_map.get(code), "required_active_mass_kg": requirement_map.get(code, 0.0)} for code in material_codes()]
+
+
 @app.post("/api/v1/batches")
 def add_batch(item: BatchIn, request: Request) -> dict[str, Any]:
     current_user(request)
@@ -1126,6 +1170,14 @@ def delete_batch(batch_id: str, request: Request) -> dict[str, bool]:
     return {"deleted": True}
 
 
+@app.delete("/api/v1/batches")
+def clear_batches(request: Request) -> dict[str, int]:
+    current_user(request, admin=True)
+    con = db(); cur = con.execute("DELETE FROM batches"); deleted = cur.rowcount or 0
+    bump_data_version(con); con.commit(); con.close()
+    return {"deleted": deleted}
+
+
 @app.get("/api/v1/quality-rules")
 def get_rules(request: Request) -> list[dict[str, Any]]:
     current_user(request)
@@ -1135,8 +1187,11 @@ def get_rules(request: Request) -> list[dict[str, Any]]:
 @app.put("/api/v1/quality-rules/{material_type}")
 def put_rule(material_type: str, item: RuleIn, request: Request) -> dict[str, Any]:
     current_user(request)
-    if material_type not in MATERIALS or item.rework_threshold_percent > item.good_threshold_percent: raise HTTPException(422, "invalid rule")
-    con = db(); con.execute("UPDATE quality_rules SET good_threshold_percent=?, rework_threshold_percent=?, good_recovery_factor=?, rework_recovery_factor=?, reject_recovery_factor=? WHERE material_type=?", (*item.model_dump().values(), material_type)); bump_data_version(con); con.commit(); con.close(); return {"material_type": material_type, **item.model_dump()}
+    material_type = material_type.upper()
+    if not MATERIAL_CODE.fullmatch(material_type) or item.rework_threshold_percent > item.good_threshold_percent: raise HTTPException(422, "invalid rule")
+    con = db(); values = item.model_dump()
+    con.execute("INSERT INTO quality_rules VALUES (?,?,?,?,?,?) ON CONFLICT(material_type) DO UPDATE SET good_threshold_percent=excluded.good_threshold_percent, rework_threshold_percent=excluded.rework_threshold_percent, good_recovery_factor=excluded.good_recovery_factor, rework_recovery_factor=excluded.rework_recovery_factor, reject_recovery_factor=excluded.reject_recovery_factor", (material_type, *values.values()))
+    con.execute("INSERT INTO requirements VALUES (?,?) ON CONFLICT(material_type) DO NOTHING", (material_type, 0.0)); bump_data_version(con); con.commit(); con.close(); return {"material_type": material_type, **values}
 
 
 @app.post("/api/v1/classifications/run")
@@ -1235,14 +1290,14 @@ def chat(payload: ChatIn, request: Request) -> Any:
         if intent["intent"] == "CLARIFY":
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": clarification_text(intent), "question": clarification_text(intent), "needs_clarification": True, "choices": intent.get("choices", []), "tool_calls": []}
             con = db(); save_message(con, chat_id, answer["answer"]); con.commit(); con.close(); return answer
-        if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized and not explanation:
+        if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[a-z][a-z0-9_-]{0,15}-\d+\b", normalized) and "сам" not in normalized and not explanation:
             con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if "самую стар" in normalized and not any(m.lower() in normalized for m in MATERIALS) and not explanation:
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(MATERIALS), "tool_calls": []}
+        if "самую стар" in normalized and not any(m.lower() in normalized for m in material_codes()) and not explanation:
+            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(material_codes()), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized and not explanation:
+        if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         material = requested_material(payload.message)
@@ -1292,14 +1347,14 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 answer = clarification_text(intent)
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": answer, "question": answer, "needs_clarification": True, "choices": intent.get("choices", []), "tool_calls": []}
                 yield sse_event({"type": "token", "text": answer})
-            elif any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[abc]-\d+\b", normalized) and "сам" not in normalized and not explanation:
+            elif any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[a-z][a-z0-9_-]{0,15}-\d+\b", normalized) and "сам" not in normalized and not explanation:
                 con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif "самую стар" in normalized and not any(m.lower() in normalized for m in MATERIALS) and not explanation:
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(MATERIALS), "tool_calls": []}
+            elif "самую стар" in normalized and not any(m.lower() in normalized for m in material_codes()) and not explanation:
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(material_codes()), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in MATERIALS) and "все" not in normalized and not explanation:
+            elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             elif any(word in normalized for word in ("недельный план", "составь план", "план производства", "построй план")) and not explanation and set(parse_requirements(payload.message)) != set(MATERIALS):
@@ -1358,6 +1413,8 @@ def put_requirements(payload: dict[str, float], request: Request) -> dict[str, f
     current_user(request)
     con = db();
     for material, value in payload.items():
-        if material not in MATERIALS or value < 0: raise HTTPException(422, "invalid requirement")
+        material = material.upper()
+        if not MATERIAL_CODE.fullmatch(material) or value < 0: raise HTTPException(422, "invalid requirement")
+        ensure_materials(con, {material})
         con.execute("INSERT INTO requirements VALUES (?,?) ON CONFLICT(material_type) DO UPDATE SET required_active_mass_kg=excluded.required_active_mass_kg", (material, value))
     bump_data_version(con); con.commit(); con.close(); return requirements_default()

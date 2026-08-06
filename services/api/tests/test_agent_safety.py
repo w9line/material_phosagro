@@ -127,6 +127,17 @@ def test_rejection_report_matches_derived_quality(monkeypatch, tmp_path):
     assert report["meta"]["units"]["mass"] == "kg_raw"
 
 
+def test_custom_material_gets_default_rule_and_is_plannable(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DB_PATH", str(tmp_path / "materials.db"))
+    monkeypatch.setattr(app, "DATABASE_URL", "sqlite:///materials.db")
+    app.init_db()
+    con = app.db(); con.execute("DELETE FROM batches"); con.commit(); con.close()
+    app.save_batches([{"batch_id": "PHOS-1", "material_type": "PHOS", "raw_mass_kg": 100, "concentration_percent": 30, "arrival_date": "2026-01-01", "supplier": None, "warehouse": None, "certificate_number": None, "notes": None, "remaining_raw_mass_kg": 100, "source": "test"}])
+    assert "PHOS" in app.material_codes()
+    assert app.classify({"material_type": "PHOS", "concentration_percent": 30})["status"] == "GOOD"
+    assert app.build_plan({"PHOS": 20}, "hybrid")["materials"]["PHOS"]["covered_active_mass_kg"] == 20
+
+
 def _auth_request(user_id: str, token: str) -> Request:
     return Request({"type": "http", "headers": [(b"authorization", f"Bearer {token}".encode())], "method": "POST", "path": "/"})
 
