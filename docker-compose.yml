@@ -53,5 +53,29 @@ services:
       timeout: 3s
       retries: 5
 
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: services/mcp/Dockerfile
+    ports:
+      - "127.0.0.1:8011:8011"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://raw_material:${POSTGRES_PASSWORD:-raw-material-local}@db:5432/raw_material
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-8011}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+      MCP_SERVICE_USER_ID: ${MCP_SERVICE_USER_ID:-mcp-service}
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8011/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   postgres_data:
