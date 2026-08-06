@@ -43,8 +43,10 @@ DEFAULT_RULES = {
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "check_batch_quality": {"title": "Качество партии", "aliases": ["проверка партии", "статус партии", "check batch quality"], "description": "Проверяет качество и статус одной партии.", "parameters": {"batch_id": {"type": "string"}}, "required": ["batch_id"], "examples": ["Проверь A-001"], "mutating": False, "category": "quality", "units": {"mass": "kg_raw"}},
     "get_batch_details": {"title": "Детали партии", "aliases": ["параметры партии", "batch details"], "description": "Возвращает фактические параметры партии.", "parameters": {"batch_id": {"type": "string"}}, "required": ["batch_id"], "examples": ["Покажи детали A-001"], "mutating": False, "category": "quality", "units": {"mass": "kg_raw"}},
+    "get_oldest_batches": {"title": "Самые старые партии", "aliases": ["старые партии", "самая старая партия", "oldest batches"], "description": "Показывает партии с самой ранней датой поступления.", "parameters": {"material_type": {"type": ["string", "null"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": [], "examples": ["Какие самые старые партии?"], "mutating": False, "category": "inventory", "units": {"mass": "kg_raw"}},
+    "build_chart": {"title": "График", "aliases": ["график", "диаграмма", "визуализация", "chart"], "description": "Строит график по текущему реестру партий.", "parameters": {"chart_type": {"type": "string", "enum": ["inventory", "quality", "concentration"]}, "material_type": {"type": ["string", "null"]}}, "required": [], "examples": ["Построй график остатков"], "mutating": False, "category": "reports", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active", "concentration": "percent"}},
     "classify_batches": {"title": "Классификация", "aliases": ["классификация партий", "classify batches"], "description": "Классифицирует партии по действующим порогам качества.", "parameters": {"material_type": {"type": ["string", "null"]}, "only_unclassified": {"type": "boolean"}}, "required": [], "examples": ["Классифицируй партии A"], "mutating": False, "category": "quality", "units": {}, "filters": ["material_type"]},
-    "get_inventory_summary": {"title": "Остатки", "aliases": ["склад", "запасы", "сырьё", "inventory"], "description": "Показывает остатки сырой массы и доступного активного вещества.", "parameters": {"material_type": {"type": ["string", "null"]}, "group_by": {"type": "string", "enum": ["material_and_status"]}}, "required": [], "examples": ["Покажи остатки по A"], "mutating": False, "category": "inventory", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active"}, "filters": ["material_type"]},
+    "get_inventory_summary": {"title": "Остатки", "aliases": ["остатков", "склад", "запасы", "сырьё", "inventory"], "description": "Показывает остатки сырой массы и доступного активного вещества.", "parameters": {"material_type": {"type": ["string", "null"]}, "group_by": {"type": "string", "enum": ["material_and_status"]}}, "required": [], "examples": ["Покажи остатки по A"], "mutating": False, "category": "inventory", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active"}, "filters": ["material_type"]},
     "build_weekly_plan": {"title": "Недельный план", "aliases": ["план производства", "weekly plan", "планирование"], "description": "Строит безопасный preview-план без списания остатков.", "parameters": {"requirements": {"type": "object"}, "policy": {"type": "string", "enum": list(POLICIES)}, "allow_rework": {"type": "boolean"}}, "required": ["requirements", "policy"], "examples": ["Построй план A 3000 B 2500 C 1800, hybrid"], "mutating": False, "category": "planning", "units": {"requirements": "kg_active"}},
     "check_material_deficit": {"title": "Дефицит", "aliases": ["не хватит", "потребность", "material deficit"], "description": "Сравнивает потребность с доступным активным веществом.", "parameters": {"requirements": {"type": "object"}, "include_rework": {"type": "boolean"}}, "required": ["requirements"], "examples": ["Проверь дефицит A 3000"], "mutating": False, "category": "planning", "units": {"requirements": "kg_active", "deficit": "kg_active"}},
     "compare_allocation_policies": {"title": "Стратегии", "aliases": ["политики распределения", "сравнение стратегий", "compare policies", "allocation policies", "fifo"], "description": "Сравнивает FIFO, max concentration и hybrid без изменения данных.", "parameters": {"requirements": {"type": "object"}, "policies": {"type": "array", "items": {"type": "string", "enum": list(POLICIES)}}}, "required": ["requirements", "policies"], "examples": ["Сравни FIFO и hybrid для A 3000"], "mutating": False, "category": "planning", "units": {"requirements": "kg_active"}},
@@ -372,6 +374,10 @@ def save_message(con: sqlite3.Connection, chat_id: str, role: str, content: str,
     con.execute("UPDATE chats SET updated_at=? WHERE chat_id=?", (now, chat_id))
 
 
+def trace_with_result(trace: list[dict[str, Any]], data: Any) -> list[dict[str, Any]]:
+    return [{**item, **({"result": data} if item.get("tool") == "build_chart" else {})} for item in trace]
+
+
 def rules() -> dict[str, dict[str, float]]:
     con = db(); rows = con.execute("SELECT * FROM quality_rules").fetchall(); con.close()
     return {r["material_type"]: dict(r) for r in rows}
@@ -499,6 +505,26 @@ def tool(name: str, args: dict[str, Any]) -> Any:
         row = con.execute("SELECT * FROM batches WHERE batch_id=?", (args["batch_id"],)).fetchone(); con.close()
         if not row: raise ValueError("batch not found")
         return batch_dict(row)
+    if name == "get_oldest_batches":
+        material = args.get("material_type"); limit = min(20, max(1, int(args.get("limit", 5))))
+        rows = con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else "") + " ORDER BY arrival_date, created_at, batch_id LIMIT ?", (material, limit) if material else (limit,)).fetchall(); con.close()
+        return {"batches": [batch_dict(row) for row in rows], "limit": limit, "material_type": material, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"material_type": material, "limit": limit})}
+    if name == "build_chart":
+        material = args.get("material_type"); chart_type = args.get("chart_type", "inventory")
+        rows = [batch_dict(row) for row in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close()
+        labels = sorted({row["material_type"] for row in rows})
+        if chart_type == "quality":
+            labels = ["GOOD", "REWORK", "REJECTED"]
+            values = [sum(row["quality"]["status"] == status for row in rows) for status in labels]
+            series = [{"name": "Партий", "values": values}]; title = "Распределение по статусам"; unit = "batches"
+        elif chart_type == "concentration":
+            values = [round(sum(row["concentration_percent"] for row in rows if row["material_type"] == label) / max(1, sum(row["material_type"] == label for row in rows)), 2) for label in labels]
+            series = [{"name": "Средняя концентрация, %", "values": values}]; title = "Средняя концентрация по материалам"; unit = "%"
+        else:
+            raw = [round(sum(row["remaining_raw_mass_kg"] for row in rows if row["material_type"] == label), 3) for label in labels]
+            active = [round(sum(row["available_active_mass_kg"] for row in rows if row["material_type"] == label), 3) for label in labels]
+            series = [{"name": "Сырьё, кг", "values": raw}, {"name": "Активное, кг", "values": active}]; title = "Остатки по материалам"; unit = "kg"
+        return {"chart_id": str(uuid.uuid4()), "chart_type": chart_type, "title": title, "labels": labels, "series": series, "unit": unit, "material_type": material, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"material_type": material, "chart_type": chart_type})}
     if name == "classify_batches":
         material = args.get("material_type"); rows = con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall(); con.close(); counts = {"GOOD": 0, "REWORK": 0, "REJECTED": 0}
         for row in rows: counts[classify(dict(row))["status"]] += 1
@@ -566,6 +592,8 @@ def tool_specs() -> list[dict[str, Any]]:
 
 
 def summarize_tool_result(data: Any) -> str:
+    if isinstance(data, dict) and data.get("chart_type"):
+        return f"График «{data['title']}» построен по текущему реестру."
     if isinstance(data, dict) and data.get("groups") is not None:
         groups = data["groups"]
         if not groups:
@@ -582,6 +610,9 @@ def summarize_tool_result(data: Any) -> str:
         for material, item in data["materials"].items():
             lines.append(f"{material}: покрытие {item['coverage_percent']:.1f}%, дефицит {item['deficit_active_mass_kg']:.1f} кг активного вещества")
         return "\n".join(lines)
+    if isinstance(data, dict) and data.get("batches") is not None and data.get("limit") is not None:
+        rows = data["batches"]
+        return "Самые ранние партии по дате поступления:\n" + "\n".join(f"{row['batch_id']} · материал {row['material_type']} · {row['arrival_date']}" for row in rows) if rows else "Партий в реестре нет."
     if isinstance(data, dict) and data.get("batches") is not None:
         return f"Отчёт сформирован: {len(data['batches'])} проблемных партий, {data.get('total_raw_mass_kg', 0):.1f} кг остатка к решению."
     if isinstance(data, dict) and data.get("comparison"):
@@ -657,6 +688,8 @@ def parse_requirement_details(message: str) -> tuple[dict[str, float], str | Non
     found_unit: str | None = None
     for material in material_codes():
         match = re.search(rf"(?:материал\s*)?\b{material.lower()}\b(?:\s+(?:на\s+)?(?:потребность|нужно|нужна|спрос)\s*)?\s*(?:[:=]|[-–])?\s*(\d+(?:\.\d+)?)\s*(т|тонн|тонны|кг|kg|г|g)?", normalized)
+        if not match:
+            match = re.search(rf"(\d+(?:\.\d+)?)\s*(т|тонн|тонны|кг|kg|г|g)\s*(?:материал\s*)?\b{material.lower()}\b", normalized)
         if match:
             unit = match.group(2) or "кг"
             values[material] = float(match.group(1)) * units[unit]
@@ -690,6 +723,8 @@ def clarification_text(intent: dict[str, Any]) -> str:
     missing = intent.get("missing_fields", [])
     if "mass_basis" in missing:
         return "Уточните, числа указаны как масса активного вещества или как масса сырья."
+    if intent.get("tool_name") == "check_material_deficit" and "requirements" in missing:
+        return "Укажите потребность в кг активного вещества, например: A 3000, B 2500, C 1800."
     return "Уточните, пожалуйста: " + ", ".join(missing or ["параметры запроса"]) + "."
 
 
@@ -720,7 +755,15 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_batch_details", "arguments": {"batch_id": batch_match.group(1).upper()}, "missing_fields": [], "confidence": 0.99, "reason": "Явно запрошены детали партии"}
     if batch_match and any(word in normalized for word in ("проверь", "качество", "статус", "парт")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "check_batch_quality", "arguments": {"batch_id": batch_match.group(1).upper()}, "missing_fields": [], "confidence": 0.99, "reason": "Явно указана партия и команда проверки"}
-    if any(word in normalized for word in ("классифиц", "классификац")) and any(word in normalized for word in ("запусти", "сделай", "проведи", "покажи", "выполни")):
+    if any(word in normalized for word in ("проверь качество партии", "проверь партию", "статус партии", "карточка партии")):
+        con = db(); choices = [row[0] for row in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
+        return {"intent": "CLARIFY", "tool_name": "check_batch_quality", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для проверки", "choices": choices}
+    if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")):
+        chart_type = "quality" if any(word in normalized for word in ("статус", "качеств", "брак")) else "concentration" if "концентрац" in normalized else "inventory"
+        return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": {"chart_type": chart_type, "material_type": material}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация данных"}
+    if any(word in normalized for word in ("самую стар", "самые стар", "старейш", "ранние партии")):
+        return {"intent": "EXECUTE_TOOL", "tool_name": "get_oldest_batches", "arguments": {"material_type": material, "limit": 5}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошены партии с самой ранней датой поступления"}
+    if any(word in normalized for word in ("классифиц", "классификац")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "classify_batches", "arguments": {"material_type": material, "only_unclassified": False}, "missing_fields": [], "confidence": 0.96, "reason": "Явно запрошена классификация партий"}
     if any(word in normalized for word in ("остат", "остал", "склад", "запас", "сырь", "че по", "потер")) and any(word in normalized for word in ("покажи", "покаж", "дай", "проверь", "посчитай", "сколько", "че по", "где")):
         if not material and not any(word in normalized for word in ("все", "всем", "общ", "где")):
@@ -740,7 +783,8 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_weekly_plan", "arguments": {"requirements": requirements, "policy": policy, "allow_rework": True, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.98, "reason": "Все обязательные параметры preview-плана указаны"}
     if any(word in normalized for word in ("дефицит", "хватит", "потребн", "вытян", "достат")) and any(word in normalized for word in ("проверь", "посчитай", "есть", "хватит", "вытян", "достат")):
         requirements = parse_requirements(message)
-        if not requirements: return {"intent": "CLARIFY", "tool_name": "check_material_deficit", "arguments": {}, "missing_fields": ["requirements"], "confidence": 0.9, "reason": "Нужна потребность в кг активного вещества"}
+        if not requirements:
+            return {"intent": "EXECUTE_TOOL", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements_default(), "include_rework": True}, "missing_fields": [], "confidence": 0.94, "reason": "Использована текущая сохранённая потребность"}
         if not mass_basis(message): return {"intent": "CLARIFY", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements}, "missing_fields": ["mass_basis"], "confidence": 0.94, "reason": "Нужно различить массу сырья и активного вещества"}
         return {"intent": "EXECUTE_TOOL", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements, "include_rework": True, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.96, "reason": "Указана потребность для проверки дефицита"}
     if any(word in normalized for word in ("сравни", "стратег", "политик")) and any(word in normalized for word in ("fifo", "hybrid", "концентрац", "стратег")):
@@ -836,7 +880,10 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
         _, messages = explanation_prompt(message, history, name, data)
         body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_EXPLAIN_MAX_TOKENS", "650")), "messages": messages}
         req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
-        with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response: result = json.load(response)
+        try:
+            with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response: result = json.load(response)
+        except Exception:
+            return "offline", summarize_tool_result(data), data, trace
         content = (result["choices"][0]["message"].get("content") or "").strip()
         if data and not answer_numbers_are_grounded(content, data): content = summarize_tool_result(data)
         return "llm", content or summarize_tool_result(data), data, trace
@@ -914,14 +961,20 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
         body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_EXPLAIN_MAX_TOKENS", "650")), "messages": messages, "stream": True}
         req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
         answer_parts: list[str] = []
-        with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="ignore").strip()
-                if not line.startswith("data:"): continue
-                payload = line[5:].strip()
-                if payload == "[DONE]": break
-                delta = json.loads(payload).get("choices", [{}])[0].get("delta", {}).get("content") or ""
-                if delta: answer_parts.append(delta)
+        try:
+            with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line.startswith("data:"): continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]": break
+                    delta = json.loads(payload).get("choices", [{}])[0].get("delta", {}).get("content") or ""
+                    if delta: answer_parts.append(delta)
+        except Exception:
+            answer = summarize_tool_result(data)
+            yield {"type": "token", "text": answer}
+            yield {"type": "done", "response": {"mode": "offline", "answer": answer, "result": data, "tool_calls": trace}}
+            return
         answer = "".join(answer_parts).strip()
         if data and not answer_numbers_are_grounded(answer, data): answer = summarize_tool_result(data)
         answer = answer or summarize_tool_result(data)
@@ -1294,9 +1347,6 @@ def chat(payload: ChatIn, request: Request) -> Any:
             con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if "самую стар" in normalized and not any(m.lower() in normalized for m in material_codes()) and not explanation:
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(material_codes()), "tool_calls": []}
-            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
@@ -1307,17 +1357,15 @@ def chat(payload: ChatIn, request: Request) -> Any:
             if missing:
                 answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": f"Чтобы построить недельный план, укажите потребность по активному веществу для {', '.join(missing)}. Например: A 3000, B 3000, C 3000.", "needs_clarification": True, "choices": [], "tool_calls": []}
                 con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if any(word in normalized for word in ("остат", "склад", "запас")) and not material and "все" not in normalized and "всем" not in normalized and not explanation:
+        if any(word in normalized for word in ("остат", "склад", "запас")) and intent["intent"] != "EXECUTE_TOOL" and not material and "все" not in normalized and "всем" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
-            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if any(word in normalized for word in ("дефицит", "хватит", "потребн")) and not material and "все" not in normalized and "всем" not in normalized and not explanation:
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала проверить дефицит?", "question": "Для какого материала проверить дефицит?", "needs_clarification": True, "choices": material_choices("Проверь дефицит"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         if any(word in normalized for word in ("сравни стратег", "сравнить стратег")) and not any(word in normalized for word in ("fifo", "hybrid", "концентрац")) and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какие стратегии сравнить?", "question": "Какие стратегии сравнить?", "needs_clarification": True, "choices": [{"label": "Все три стратегии", "value": "Сравни все стратегии распределения"}, {"label": "FIFO vs Hybrid", "value": "Сравни стратегии FIFO и hybrid"}, {"label": "FIFO vs концентрация", "value": "Сравни strict_fifo и max_concentration"}], "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         result = llm_agent(payload.message, history) or local_agent(payload.message)
         name, answer, data, trace = result
+        trace = trace_with_result(trace, data)
         response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "llm" if name == "llm" else "offline", "answer": answer, "tool": trace[-1]["tool"] if trace else None, "tool_calls": trace, "result": data}
         con = db(); save_message(con, chat_id, "assistant", answer, trace); con.commit(); con.close(); return response
     except Exception as exc:
@@ -1351,9 +1399,6 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif "самую стар" in normalized and not any(m.lower() in normalized for m in material_codes()) and not explanation:
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала найти самую старую партию?", "question": "Для какого материала найти самую старую партию?", "needs_clarification": True, "choices": list(material_codes()), "tool_calls": []}
-                yield sse_event({"type": "token", "text": response["answer"]})
             elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
@@ -1361,11 +1406,8 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 missing = [m for m in MATERIALS if m not in parse_requirements(payload.message)]
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": f"Чтобы построить недельный план, укажите потребность по активному веществу для {', '.join(missing)}. Например: A 3000, B 3000, C 3000.", "needs_clarification": True, "choices": [], "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(word in normalized for word in ("остат", "склад", "запас")) and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
+            elif any(word in normalized for word in ("остат", "склад", "запас")) and intent["intent"] != "EXECUTE_TOOL" and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
-                yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(word in normalized for word in ("дефицит", "хватит", "потребн")) and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Для какого материала проверить дефицит?", "question": "Для какого материала проверить дефицит?", "needs_clarification": True, "choices": material_choices("Проверь дефицит"), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             elif any(word in normalized for word in ("сравни стратег", "сравнить стратег")) and not any(word in normalized for word in ("fifo", "hybrid", "концентрац")) and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какие стратегии сравнить?", "question": "Какие стратегии сравнить?", "needs_clarification": True, "choices": [{"label": "Все три стратегии", "value": "Сравни все стратегии распределения"}, {"label": "FIFO vs Hybrid", "value": "Сравни стратегии FIFO и hybrid"}, {"label": "FIFO vs концентрация", "value": "Сравни strict_fifo и max_concentration"}], "tool_calls": []}
@@ -1378,7 +1420,8 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                     else:
                         yield sse_event(item)
             if response:
-                con = db(); save_message(con, chat_id, "assistant", response["answer"], response.get("tool_calls", [])); con.commit(); con.close()
+                response["tool_calls"] = trace_with_result(response.get("tool_calls", []), response.get("result"))
+                con = db(); save_message(con, chat_id, "assistant", response["answer"], response["tool_calls"]); con.commit(); con.close()
                 yield sse_event({"type": "done", "response": response})
         except Exception as exc:
             try:

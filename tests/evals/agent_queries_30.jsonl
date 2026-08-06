@@ -1,0 +1,30 @@
+{"query":"Покажи остатки по A","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Че по сырью B?","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Покажи остатки","expected_intent":"CLARIFY","expected_tool":"get_inventory_summary"}
+{"query":"Какие самые старые партии?","expected_intent":"EXECUTE_TOOL","expected_tool":"get_oldest_batches"}
+{"query":"Покажи самые ранние партии по материалу D","expected_intent":"EXECUTE_TOOL","expected_tool":"get_oldest_batches"}
+{"query":"Проверь качество партии A-001","expected_intent":"EXECUTE_TOOL","expected_tool":"check_batch_quality"}
+{"query":"Покажи детали партии E-0001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
+{"query":"Классифицируй все партии","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проведи классификацию партий D","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
+{"query":"Проверь дефицит материалов","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Хватит ли B на потребность 2500 кг активного вещества?","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит C 2 т активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Построй недельный план A 3000 кг активного вещества B 2500 кг активного вещества C 1800 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
+{"query":"Построй недельный план","expected_intent":"CLARIFY","expected_tool":"build_weekly_plan"}
+{"query":"Сравни стратегии FIFO и hybrid для A 3000 кг активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Сравни стратегии","expected_intent":"CLARIFY","expected_tool":"compare_allocation_policies"}
+{"query":"Сформируй отчёт по браку A","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Покажи брак по всем материалам","expected_intent":"EXECUTE_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Смоделируй сценарий B на 20% hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Что будет, если потребность C вырастет на 15% hybrid?","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change"}
+{"query":"Как работает инструмент остатков?","expected_intent":"EXPLAIN_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"Расскажи про отчёт по браку, ничего не запускай","expected_intent":"EXPLAIN_TOOL","expected_tool":"generate_rejection_report"}
+{"query":"Не запускай инструмент, просто объясни FIFO","expected_intent":"EXPLAIN_TOOL","expected_tool":"compare_allocation_policies"}
+{"query":"Привет, что ты умеешь?","expected_intent":"GENERAL_HELP","expected_tool":null}
+{"query":"А теперь по B","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary","history":[{"role":"user","content":"Покажи остатки по A"},{"role":"assistant","content":"Сводка готова."}]}
+{"query":"Сделай такой же, но FIFO","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan","history":[{"role":"user","content":"Построй план A 3000 кг активного вещества B 2500 кг активного вещества C 1800 кг активного вещества hybrid"},{"role":"assistant","content":"Preview готов."}]}
+{"query":"Увеличь A на 20%","expected_intent":"EXECUTE_TOOL","expected_tool":"simulate_requirement_change","history":[{"role":"user","content":"Построй план A 3000 кг активного вещества B 2500 кг активного вещества C 1800 кг активного вещества hybrid"},{"role":"assistant","content":"Preview готов."}]}
+{"query":"Где больше всего потерь?","expected_intent":"EXECUTE_TOOL","expected_tool":"get_inventory_summary"}
+{"query":"У нас 3 тонны A — этого хватит?","expected_intent":"CLARIFY","expected_tool":"check_material_deficit"}
+{"query":"Проверь статус партии","expected_intent":"CLARIFY","expected_tool":"check_batch_quality"}

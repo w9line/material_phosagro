@@ -26,7 +26,7 @@ def main() -> int:
     cases = [json.loads(line) for line in Path(args.input).read_text().splitlines() if line.strip()]
     rows = []
     for case in cases:
-        result = app.route_intent(case["query"])
+        result = app.route_intent(case["query"], case.get("history", []))
         rows.append({"query": case["query"], "expected": case, "actual": result, "intent_ok": result["intent"] == case["expected_intent"], "tool_ok": result.get("tool_name") == case.get("expected_tool")})
     intent_accuracy = sum(row["intent_ok"] for row in rows) / len(rows) if rows else 0
     tool_accuracy = sum(row["tool_ok"] for row in rows if row["expected"].get("expected_tool")) / max(1, sum(bool(row["expected"].get("expected_tool")) for row in rows))
