@@ -77,6 +77,19 @@ def test_obvious_requests_use_backend_router_before_llm(monkeypatch):
     assert not app.llm_may_select_tool("Как работает инструмент остатков?")
 
 
+def test_combined_rejection_report_and_chart_keep_both_intents(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DB_PATH", str(tmp_path / "combined.db"))
+    monkeypatch.setattr(app, "DATABASE_URL", "sqlite:///combined.db")
+    app.init_db()
+    first = app.route_intent("Создай отчёт по браку и построй график брака")
+    assert first["intent"] == "CLARIFY"
+    assert any("построй график" in choice["value"].lower() for choice in first["choices"])
+    routed = app.routed_tool_result("Создай отчёт по браку и построй график брака по всем материалам", [])
+    assert [item["tool"] for item in routed[2]] == ["generate_rejection_report", "build_chart"]
+    assert routed[1]["report"]["batches"] is not None
+    assert routed[1]["chart"]["chart_type"] == "quality"
+
+
 def test_llm_context_is_compact():
     history = [{"role": "user", "content": "x" * 2000}, {"role": "assistant", "content": "y" * 2000}]
     assert len(app.compact_history(history)[0]["content"]) == 700

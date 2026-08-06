@@ -375,7 +375,7 @@ def save_message(con: sqlite3.Connection, chat_id: str, role: str, content: str,
 
 
 def trace_with_result(trace: list[dict[str, Any]], data: Any) -> list[dict[str, Any]]:
-    return [{**item, **({"result": data} if item.get("tool") == "build_chart" else {})} for item in trace]
+    return [{**item, **({"result": data.get("chart", data) if isinstance(data, dict) else data} if item.get("tool") == "build_chart" else {})} for item in trace]
 
 
 def rules() -> dict[str, dict[str, float]]:
@@ -592,6 +592,9 @@ def tool_specs() -> list[dict[str, Any]]:
 
 
 def summarize_tool_result(data: Any) -> str:
+    if isinstance(data, dict) and data.get("report") and data.get("chart"):
+        report = data["report"]
+        return f"Отчёт по браку сформирован: {report.get('total_batches', len(report.get('batches', [])))} проблемных партий. График «{data['chart'].get('title', 'по статусам')}» построен."
     if isinstance(data, dict) and data.get("chart_type"):
         return f"График «{data['title']}» построен по текущему реестру."
     if isinstance(data, dict) and data.get("groups") is not None:
@@ -758,7 +761,7 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
     if any(word in normalized for word in ("проверь качество партии", "проверь партию", "статус партии", "карточка партии")):
         con = db(); choices = [row[0] for row in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
         return {"intent": "CLARIFY", "tool_name": "check_batch_quality", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для проверки", "choices": choices}
-    if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")):
+    if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")) and not any(word in normalized for word in ("брак", "отбрак", "отчёт", "отчет", "отклон")):
         chart_type = "quality" if any(word in normalized for word in ("статус", "качеств", "брак")) else "concentration" if "концентрац" in normalized else "inventory"
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": {"chart_type": chart_type, "material_type": material}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация данных"}
     if any(word in normalized for word in ("самую стар", "самые стар", "старейш", "ранние партии")):
@@ -771,7 +774,8 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_inventory_summary", "arguments": {"material_type": material, "group_by": "material_and_status"}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошена сводка остатков"}
     if any(word in normalized for word in ("брак", "отбрак", "доработ", "проблемн", "отклон")) and any(word in normalized for word in ("покажи", "сделай", "сформируй", "отчёт", "отчет", "парти")):
         if not material and not any(word in normalized for word in ("все", "всем")):
-            return {"intent": "CLARIFY", "tool_name": "generate_rejection_report", "arguments": {}, "missing_fields": ["material_type"], "confidence": 0.95, "reason": "Нужно выбрать материал или все материалы", "choices": material_choices("Покажи отчёт по браку")}
+            prompt = "Создай отчёт по браку и построй график брака" if any(word in normalized for word in ("график", "диаграмм", "визуализ")) else "Покажи отчёт по браку"
+            return {"intent": "CLARIFY", "tool_name": "generate_rejection_report", "arguments": {}, "missing_fields": ["material_type"], "confidence": 0.95, "reason": "Нужно выбрать материал или все материалы", "choices": material_choices(prompt)}
         return {"intent": "EXECUTE_TOOL", "tool_name": "generate_rejection_report", "arguments": {"material_type": material, "include_rework": True, "include_rejected": True}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошен отчёт по браку"}
     if any(word in normalized for word in ("недельный план", "составь план", "построй план", "план производства")):
         requirements = parse_requirements(message); missing = [m for m in MATERIALS if m not in requirements]
@@ -841,6 +845,15 @@ def routed_tool_result(message: str, history: list[dict[str, str]]) -> tuple[str
         return None
     name, args = intent["tool_name"], intent["arguments"]
     try:
+        if name == "generate_rejection_report" and any(word in message.lower() for word in ("график", "диаграмм", "визуализ")):
+            report = tool(name, args)
+            chart_args = {"chart_type": "quality", "material_type": args.get("material_type")}
+            chart = tool("build_chart", chart_args)
+            trace = [
+                {"tool": name, "arguments": args, "status": "success", "source": "router"},
+                {"tool": "build_chart", "arguments": chart_args, "status": "success", "source": "router"},
+            ]
+            return name, {"report": report, "chart": chart}, trace
         data = tool(name, args)
         trace = [{"tool": name, "arguments": args, "status": "success", "source": "router"}]
     except Exception as exc:
@@ -1347,7 +1360,7 @@ def chat(payload: ChatIn, request: Request) -> Any:
             con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
+        if any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(word in normalized for word in ("график", "диаграмм", "визуализ")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         material = requested_material(payload.message)
@@ -1399,7 +1412,7 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какую партию проверить?", "question": "Какую партию проверить?", "needs_clarification": True, "choices": choices, "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
+            elif any(x in normalized for x in ("отчет по браку", "отчёт по браку", "покажи брак")) and not any(word in normalized for word in ("график", "диаграмм", "визуализ")) and not any(m.lower() in normalized for m in material_codes()) and "все" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу сформировать отчёт?", "question": "По какому материалу сформировать отчёт?", "needs_clarification": True, "choices": material_choices("Покажи отчёт по браку"), "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             elif any(word in normalized for word in ("недельный план", "составь план", "план производства", "построй план")) and not explanation and set(parse_requirements(payload.message)) != set(MATERIALS):
