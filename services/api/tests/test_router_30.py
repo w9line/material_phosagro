@@ -31,3 +31,17 @@ def test_chart_router_and_payload(monkeypatch, tmp_path):
     data = app.tool("build_chart", intent["arguments"])
     assert {"chart_type", "labels", "series", "meta"} <= set(data)
     assert data["chart_type"] == "concentration"
+
+
+def test_material_quality_chart_groups_statuses_by_material(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DB_PATH", str(tmp_path / "material-quality.db"))
+    monkeypatch.setattr(app, "DATABASE_URL", "sqlite:///material-quality.db")
+    app.init_db()
+    intent = app.route_intent("Сделай график по количеству каждого материала и его качеству")
+    assert intent["tool_name"] == "build_chart"
+    assert intent["arguments"]["chart_type"] == "material_quality"
+    data = app.tool("build_chart", intent["arguments"])
+    assert data["title"] == "Количество партий по материалам и качеству"
+    assert data["labels"]
+    assert {item["name"] for item in data["series"]} == {"GOOD", "REWORK", "REJECTED"}
+    assert all(len(item["values"]) == len(data["labels"]) for item in data["series"])

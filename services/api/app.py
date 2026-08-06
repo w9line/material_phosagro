@@ -44,7 +44,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "check_batch_quality": {"title": "Качество партии", "aliases": ["проверка партии", "статус партии", "check batch quality"], "description": "Проверяет качество и статус одной партии.", "parameters": {"batch_id": {"type": "string"}}, "required": ["batch_id"], "examples": ["Проверь A-001"], "mutating": False, "category": "quality", "units": {"mass": "kg_raw"}},
     "get_batch_details": {"title": "Детали партии", "aliases": ["параметры партии", "batch details"], "description": "Возвращает фактические параметры партии.", "parameters": {"batch_id": {"type": "string"}}, "required": ["batch_id"], "examples": ["Покажи детали A-001"], "mutating": False, "category": "quality", "units": {"mass": "kg_raw"}},
     "get_oldest_batches": {"title": "Самые старые партии", "aliases": ["старые партии", "самая старая партия", "oldest batches"], "description": "Показывает партии с самой ранней датой поступления.", "parameters": {"material_type": {"type": ["string", "null"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": [], "examples": ["Какие самые старые партии?"], "mutating": False, "category": "inventory", "units": {"mass": "kg_raw"}},
-    "build_chart": {"title": "График", "aliases": ["график", "диаграмма", "визуализация", "chart"], "description": "Строит график по текущему реестру партий.", "parameters": {"chart_type": {"type": "string", "enum": ["inventory", "quality", "concentration"]}, "material_type": {"type": ["string", "null"]}}, "required": [], "examples": ["Построй график остатков"], "mutating": False, "category": "reports", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active", "concentration": "percent"}},
+    "build_chart": {"title": "График", "aliases": ["график", "диаграмма", "визуализация", "chart"], "description": "Строит график по текущему реестру партий.", "parameters": {"chart_type": {"type": "string", "enum": ["inventory", "quality", "material_quality", "concentration"]}, "material_type": {"type": ["string", "null"]}}, "required": [], "examples": ["Построй график остатков"], "mutating": False, "category": "reports", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active", "concentration": "percent"}},
     "classify_batches": {"title": "Классификация", "aliases": ["классификация партий", "classify batches"], "description": "Классифицирует партии по действующим порогам качества.", "parameters": {"material_type": {"type": ["string", "null"]}, "only_unclassified": {"type": "boolean"}}, "required": [], "examples": ["Классифицируй партии A"], "mutating": False, "category": "quality", "units": {}, "filters": ["material_type"]},
     "get_inventory_summary": {"title": "Остатки", "aliases": ["остатков", "склад", "запасы", "сырьё", "inventory"], "description": "Показывает остатки сырой массы и доступного активного вещества.", "parameters": {"material_type": {"type": ["string", "null"]}, "group_by": {"type": "string", "enum": ["material_and_status"]}}, "required": [], "examples": ["Покажи остатки по A"], "mutating": False, "category": "inventory", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active"}, "filters": ["material_type"]},
     "build_weekly_plan": {"title": "Недельный план", "aliases": ["план производства", "weekly plan", "планирование"], "description": "Строит безопасный preview-план без списания остатков.", "parameters": {"requirements": {"type": "object"}, "policy": {"type": "string", "enum": list(POLICIES)}, "allow_rework": {"type": "boolean"}}, "required": ["requirements", "policy"], "examples": ["Построй план A 3000 B 2500 C 1800, hybrid"], "mutating": False, "category": "planning", "units": {"requirements": "kg_active"}},
@@ -513,7 +513,11 @@ def tool(name: str, args: dict[str, Any]) -> Any:
         material = args.get("material_type"); chart_type = args.get("chart_type", "inventory")
         rows = [batch_dict(row) for row in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close()
         labels = sorted({row["material_type"] for row in rows})
-        if chart_type == "quality":
+        if chart_type == "material_quality":
+            statuses = ("GOOD", "REWORK", "REJECTED")
+            series = [{"name": status, "values": [sum(row["material_type"] == label and row["quality"]["status"] == status for row in rows) for label in labels]} for status in statuses]
+            title = "Количество партий по материалам и качеству"; unit = "batches"
+        elif chart_type == "quality":
             labels = ["GOOD", "REWORK", "REJECTED"]
             values = [sum(row["quality"]["status"] == status for row in rows) for status in labels]
             series = [{"name": "Партий", "values": values}]; title = "Распределение по статусам"; unit = "batches"
@@ -595,6 +599,8 @@ def summarize_tool_result(data: Any) -> str:
     if isinstance(data, dict) and data.get("report") and data.get("chart"):
         report = data["report"]
         return f"Отчёт по браку сформирован: {report.get('total_batches', len(report.get('batches', [])))} проблемных партий. График «{data['chart'].get('title', 'по статусам')}» построен."
+    if isinstance(data, dict) and data.get("results"):
+        return "\n".join(summarize_tool_result(result) for result in data["results"].values())
     if isinstance(data, dict) and data.get("chart_type"):
         return f"График «{data['title']}» построен по текущему реестру."
     if isinstance(data, dict) and data.get("groups") is not None:
@@ -762,7 +768,9 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         con = db(); choices = [row[0] for row in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
         return {"intent": "CLARIFY", "tool_name": "check_batch_quality", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для проверки", "choices": choices}
     if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")) and not any(word in normalized for word in ("брак", "отбрак", "отчёт", "отчет", "отклон")):
-        chart_type = "quality" if any(word in normalized for word in ("статус", "качеств", "брак")) else "concentration" if "концентрац" in normalized else "inventory"
+        quality_requested = any(word in normalized for word in ("статус", "качеств", "брак"))
+        material_quality = quality_requested and any(word in normalized for word in ("материал", "кажд", "колич", "по"))
+        chart_type = "material_quality" if material_quality else "quality" if quality_requested else "concentration" if "концентрац" in normalized else "inventory"
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": {"chart_type": chart_type, "material_type": material}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация данных"}
     if any(word in normalized for word in ("самую стар", "самые стар", "старейш", "ранние партии")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_oldest_batches", "arguments": {"material_type": material, "limit": 5}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошены партии с самой ранней датой поступления"}
@@ -788,7 +796,9 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
     if any(word in normalized for word in ("дефицит", "хватит", "потребн", "вытян", "достат")) and any(word in normalized for word in ("проверь", "посчитай", "есть", "хватит", "вытян", "достат")):
         requirements = parse_requirements(message)
         if not requirements:
-            return {"intent": "EXECUTE_TOOL", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements_default(), "include_rework": True}, "missing_fields": [], "confidence": 0.94, "reason": "Использована текущая сохранённая потребность"}
+            if any(word in normalized for word in ("текущ", "сохранён", "сохранен", "сохраненну")):
+                return {"intent": "EXECUTE_TOOL", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements_default(), "include_rework": True}, "missing_fields": [], "confidence": 0.94, "reason": "Пользователь явно выбрал сохранённую потребность"}
+            return {"intent": "CLARIFY", "tool_name": "check_material_deficit", "arguments": {}, "missing_fields": ["requirements"], "confidence": 0.95, "reason": "Для проверки дефицита нужна явная потребность", "choices": [{"label": "Использовать сохранённую потребность", "value": "Проверь дефицит по текущей потребности"}]}
         if not mass_basis(message): return {"intent": "CLARIFY", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements}, "missing_fields": ["mass_basis"], "confidence": 0.94, "reason": "Нужно различить массу сырья и активного вещества"}
         return {"intent": "EXECUTE_TOOL", "tool_name": "check_material_deficit", "arguments": {"requirements": requirements, "include_rework": True, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.96, "reason": "Указана потребность для проверки дефицита"}
     if any(word in normalized for word in ("сравни", "стратег", "политик")) and any(word in normalized for word in ("fifo", "hybrid", "концентрац", "стратег")):
@@ -839,12 +849,48 @@ def llm_context(history: list[dict[str, str]]) -> str:
     }, ensure_ascii=False)
 
 
+def compound_request(message: str, history: list[dict[str, str]]) -> list[tuple[str, dict[str, Any]]] | None:
+    """Resolve safe read-only workflows that intentionally combine tools."""
+    normalized = message.lower()
+    intent = route_intent(message, history)
+    if intent["intent"] != "EXECUTE_TOOL" or not intent.get("arguments"):
+        return None
+    args = intent["arguments"]
+    material = args.get("material_type")
+    if any(word in normalized for word in ("график", "диаграм", "визуализ")) and any(word in normalized for word in ("остат", "склад", "запас")):
+        return [("get_inventory_summary", {"material_type": material, "group_by": "material_and_status"}), ("build_chart", {"chart_type": "inventory", "material_type": material})]
+    if any(word in normalized for word in ("график", "диаграм", "визуализ")) and any(word in normalized for word in ("брак", "отбрак", "отчёт", "отчет", "отклон")):
+        chart_type = "material_quality" if any(word in normalized for word in ("кажд", "количеств")) else "quality"
+        return [("generate_rejection_report", args), ("build_chart", {"chart_type": chart_type, "material_type": material})]
+    if any(word in normalized for word in ("классифиц", "классификац")) and any(word in normalized for word in ("брак", "отчёт", "отчет", "отклон")):
+        return [("classify_batches", args), ("generate_rejection_report", {"material_type": material, "include_rework": True, "include_rejected": True})]
+    if any(word in normalized for word in ("проверь качество", "статус партии")) and any(word in normalized for word in ("детал", "карточ")) and args.get("batch_id"):
+        return [("check_batch_quality", {"batch_id": args["batch_id"]}), ("get_batch_details", {"batch_id": args["batch_id"]})]
+    if "план" in normalized and any(word in normalized for word in ("дефицит", "стратег", "политик")) and args.get("requirements"):
+        if any(word in normalized for word in ("дефицит", "хватит")):
+            return [("build_weekly_plan", args), ("check_material_deficit", {"requirements": args["requirements"], "include_rework": args.get("allow_rework", True)})]
+        policies = [p for p, aliases in (("strict_fifo", ("fifo",)), ("hybrid", ("hybrid",)), ("max_concentration", ("концентрац", "max concentration"))) if any(alias in normalized for alias in aliases)] or list(POLICIES)
+        return [("build_weekly_plan", args), ("compare_allocation_policies", {"requirements": args["requirements"], "policies": policies})]
+    return None
+
+
 def routed_tool_result(message: str, history: list[dict[str, str]]) -> tuple[str, Any, list[dict[str, Any]]] | None:
     intent = route_intent(message, history)
     if intent["intent"] != "EXECUTE_TOOL" or not intent.get("tool_name") or not intent.get("arguments"):
         return None
     name, args = intent["tool_name"], intent["arguments"]
     try:
+        compound = compound_request(message, history)
+        if compound:
+            results = {}
+            trace = []
+            for call_name, call_args in compound:
+                results[call_name] = tool(call_name, call_args)
+                trace.append({"tool": call_name, "arguments": call_args, "status": "success", "source": "router"})
+            data = {"results": results}
+            if "generate_rejection_report" in results: data["report"] = results["generate_rejection_report"]
+            if "build_chart" in results: data["chart"] = results["build_chart"]
+            return compound[0][0], data, trace
         if name == "generate_rejection_report" and any(word in message.lower() for word in ("график", "диаграмм", "визуализ")):
             report = tool(name, args)
             chart_args = {"chart_type": "quality", "material_type": args.get("material_type")}

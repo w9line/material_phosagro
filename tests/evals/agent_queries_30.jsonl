@@ -7,7 +7,7 @@
 {"query":"Покажи детали партии E-0001","expected_intent":"EXECUTE_TOOL","expected_tool":"get_batch_details"}
 {"query":"Классифицируй все партии","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
 {"query":"Проведи классификацию партий D","expected_intent":"EXECUTE_TOOL","expected_tool":"classify_batches"}
-{"query":"Проверь дефицит материалов","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
+{"query":"Проверь дефицит материалов","expected_intent":"CLARIFY","expected_tool":"check_material_deficit"}
 {"query":"Хватит ли B на потребность 2500 кг активного вещества?","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
 {"query":"Проверь дефицит C 2 т активного вещества","expected_intent":"EXECUTE_TOOL","expected_tool":"check_material_deficit"}
 {"query":"Построй недельный план A 3000 кг активного вещества B 2500 кг активного вещества C 1800 кг активного вещества hybrid","expected_intent":"EXECUTE_TOOL","expected_tool":"build_weekly_plan"}
