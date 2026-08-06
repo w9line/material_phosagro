@@ -44,8 +44,8 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "check_batch_quality": {"title": "Качество партии", "aliases": ["проверка партии", "статус партии", "check batch quality"], "description": "Проверяет качество и статус одной партии.", "parameters": {"batch_id": {"type": "string"}}, "required": ["batch_id"], "examples": ["Проверь A-001"], "mutating": False, "category": "quality", "units": {"mass": "kg_raw"}},
     "get_batch_details": {"title": "Детали партии", "aliases": ["параметры партии", "batch details"], "description": "Возвращает фактические параметры партии.", "parameters": {"batch_id": {"type": "string"}}, "required": ["batch_id"], "examples": ["Покажи детали A-001"], "mutating": False, "category": "quality", "units": {"mass": "kg_raw"}},
     "get_oldest_batches": {"title": "Самые старые партии", "aliases": ["старые партии", "самая старая партия", "oldest batches"], "description": "Показывает партии с самой ранней датой поступления.", "parameters": {"material_type": {"type": ["string", "null"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": [], "examples": ["Какие самые старые партии?"], "mutating": False, "category": "inventory", "units": {"mass": "kg_raw"}},
-    "build_chart": {"title": "График", "aliases": ["график", "диаграмма", "визуализация", "chart"], "description": "Строит график по текущему реестру партий.", "parameters": {"chart_type": {"type": "string", "enum": ["inventory", "quality", "material_quality", "concentration"]}, "material_type": {"type": ["string", "null"]}}, "required": [], "examples": ["Построй график остатков"], "mutating": False, "category": "reports", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active", "concentration": "percent"}},
-    "classify_batches": {"title": "Классификация", "aliases": ["классификация партий", "classify batches"], "description": "Классифицирует партии по действующим порогам качества.", "parameters": {"material_type": {"type": ["string", "null"]}, "only_unclassified": {"type": "boolean"}}, "required": [], "examples": ["Классифицируй партии A"], "mutating": False, "category": "quality", "units": {}, "filters": ["material_type"]},
+    "build_chart": {"title": "График", "aliases": ["график", "диаграмма", "визуализация", "chart"], "description": "Строит график любой доступной измеримой метрики по партиям, качеству, браку или плану.", "parameters": {"chart_type": {"type": "string", "enum": ["inventory", "quality", "material_quality", "concentration", "metric"]}, "metric": {"type": ["string", "null"], "enum": ["raw_mass", "active_mass", "theoretical_active_mass", "recovery_loss", "concentration", "batch_count", "status_count", "status_share", "age_days", "rejection_batch_count", "rejection_raw_mass", "rejection_active_mass", "rejection_share", "required_active_mass", "plan_available_active_mass", "planned_batch_count", "covered_active_mass", "deficit_active_mass", "coverage_percent", "raw_mass_used", "loss", "safe_growth_percent", "deficit_delta", "base_deficit_active_mass", "new_deficit_active_mass", "base_rework_batch_count", "new_rework_batch_count", None]}, "group_by": {"type": ["string", "null"], "enum": ["material", "status", "batch", "arrival_date", "policy", None]}, "material_type": {"type": ["string", "null"]}, "requirements": {"type": ["object", "null"]}, "policy": {"type": ["string", "null"], "enum": [*POLICIES, None]}, "changes_percent": {"type": ["object", "null"]}, "policies": {"type": ["array", "null"], "items": {"type": "string", "enum": list(POLICIES)}}}, "required": [], "examples": ["Построй график остатков"], "mutating": False, "category": "reports", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active", "concentration": "percent", "age": "days", "share": "percent"}},
+    "classify_batches": {"title": "Классификация", "aliases": ["классификац", "классификация партий", "classify batches"], "description": "Классифицирует партии по действующим порогам качества.", "parameters": {"material_type": {"type": ["string", "null"]}, "only_unclassified": {"type": "boolean"}}, "required": [], "examples": ["Классифицируй партии A"], "mutating": False, "category": "quality", "units": {}, "filters": ["material_type"]},
     "get_inventory_summary": {"title": "Остатки", "aliases": ["остатков", "склад", "запасы", "сырьё", "inventory"], "description": "Показывает остатки сырой массы и доступного активного вещества.", "parameters": {"material_type": {"type": ["string", "null"]}, "group_by": {"type": "string", "enum": ["material_and_status"]}}, "required": [], "examples": ["Покажи остатки по A"], "mutating": False, "category": "inventory", "units": {"raw_mass": "kg_raw", "active_mass": "kg_active"}, "filters": ["material_type"]},
     "build_weekly_plan": {"title": "Недельный план", "aliases": ["план производства", "weekly plan", "планирование"], "description": "Строит безопасный preview-план без списания остатков.", "parameters": {"requirements": {"type": "object"}, "policy": {"type": "string", "enum": list(POLICIES)}, "allow_rework": {"type": "boolean"}}, "required": ["requirements", "policy"], "examples": ["Построй план A 3000 B 2500 C 1800, hybrid"], "mutating": False, "category": "planning", "units": {"requirements": "kg_active"}},
     "check_material_deficit": {"title": "Дефицит", "aliases": ["не хватит", "потребность", "material deficit"], "description": "Сравнивает потребность с доступным активным веществом.", "parameters": {"requirements": {"type": "object"}, "include_rework": {"type": "boolean"}}, "required": ["requirements"], "examples": ["Проверь дефицит A 3000"], "mutating": False, "category": "planning", "units": {"requirements": "kg_active", "deficit": "kg_active"}},
@@ -495,6 +495,91 @@ def requirements_default() -> dict[str, float]:
     con = db(); rows = con.execute("SELECT * FROM requirements").fetchall(); con.close(); return {r[0]: r[1] for r in rows}
 
 
+CHART_METRIC_LABELS = {
+    "raw_mass": ("Сырьё, кг", "kg"), "active_mass": ("Доступное активное вещество, кг", "kg_active"),
+    "theoretical_active_mass": ("Теоретическое активное вещество, кг", "kg_active"), "recovery_loss": ("Потери восстановления, кг", "kg_active"),
+    "concentration": ("Концентрация, %", "%"), "batch_count": ("Количество партий", "batches"),
+    "status_count": ("Количество партий по качеству", "batches"), "status_share": ("Доля партий по качеству, %", "%"),
+    "age_days": ("Возраст партий, дней", "days"), "rejection_batch_count": ("Проблемные партии", "batches"),
+    "rejection_raw_mass": ("Брак и доработка, кг сырья", "kg_raw"), "rejection_active_mass": ("Брак и доработка, кг активного вещества", "kg_active"),
+    "rejection_share": ("Доля брака и доработки, %", "%"), "required_active_mass": ("Требуемое активное вещество, кг", "kg_active"),
+    "plan_available_active_mass": ("Доступно для плана, кг активного вещества", "kg_active"), "planned_batch_count": ("Выбранные партии", "batches"),
+    "covered_active_mass": ("Покрыто активного вещества, кг", "kg_active"),
+    "deficit_active_mass": ("Дефицит активного вещества, кг", "kg_active"), "coverage_percent": ("Покрытие, %", "%"),
+    "raw_mass_used": ("Использовано сырья, кг", "kg_raw"), "loss": ("Потери плана, кг", "kg_raw"),
+    "safe_growth_percent": ("Безопасный рост потребности, %", "%"), "deficit_delta": ("Изменение дефицита, кг", "kg_active"),
+    "base_deficit_active_mass": ("Базовый дефицит, кг", "kg_active"), "new_deficit_active_mass": ("Новый дефицит, кг", "kg_active"),
+    "base_rework_batch_count": ("Базовые REWORK-партии", "batches"), "new_rework_batch_count": ("Новые REWORK-партии", "batches"),
+}
+
+
+def _chart_row_value(row: dict[str, Any], metric: str) -> float:
+    raw = float(row.get("remaining_raw_mass_kg", 0) or 0)
+    concentration = float(row.get("concentration_percent", 0) or 0)
+    active = float(row.get("available_active_mass_kg", 0) or 0)
+    return {"raw_mass": raw, "active_mass": active, "theoretical_active_mass": raw * concentration / 100, "recovery_loss": raw * concentration / 100 - active, "concentration": concentration, "age_days": max(0, (date.today() - date.fromisoformat(str(row["arrival_date"]))).days)}.get(metric, 0.0)
+
+
+def _chart_group_key(row: dict[str, Any], group_by: str | None) -> str:
+    if group_by in (None, "material"): return str(row["material_type"])
+    if group_by == "status": return str(row["quality"]["status"])
+    if group_by == "batch": return str(row["batch_id"])
+    return str(row["arrival_date"])
+
+
+def _chart_from_plan(plan: dict[str, Any], metric: str, group_by: str | None, title: str, unit: str) -> tuple[list[str], list[dict[str, Any]]]:
+    value_key = {"required_active_mass": "required_active_mass_kg", "plan_available_active_mass": "available_active_mass_kg", "covered_active_mass": "covered_active_mass_kg", "deficit_active_mass": "deficit_active_mass_kg", "coverage_percent": "coverage_percent", "raw_mass_used": "raw_mass_used_kg", "loss": "loss_kg"}.get(metric, metric)
+    if group_by == "batch":
+        items = [(item["batch_id"], item) for value in plan["materials"].values() for item in value.get("items", [])]
+        item_key = "active_mass_kg" if metric == "covered_active_mass" else "raw_mass_used_kg" if metric == "raw_mass_used" else "loss_kg"
+        return [label for label, _ in items], [{"name": title, "values": [round(float(item.get(item_key, 0) or 0), 3) for _, item in items]}]
+    if group_by in ("status", "arrival_date") and metric in {"covered_active_mass", "raw_mass_used", "loss"}:
+        items = [(item["status"] if group_by == "status" else str(item["arrival_date"]), item) for value in plan["materials"].values() for item in value.get("items", [])]
+        labels = sorted({label for label, _ in items})
+        item_key = "active_mass_kg" if metric == "covered_active_mass" else "raw_mass_used_kg" if metric == "raw_mass_used" else "loss_kg"
+        return labels, [{"name": title, "values": [round(sum(float(item.get(item_key, 0) or 0) for label, item in items if label == current), 3) for current in labels]}]
+    labels = sorted(plan["materials"])
+    if metric == "planned_batch_count": return labels, [{"name": title, "values": [len(plan["materials"][label].get("items", [])) for label in labels]}]
+    return labels, [{"name": title, "values": [round(float(plan["materials"][label].get(value_key, 0) or 0), 3) for label in labels]}]
+
+
+def _chart_payload(rows: list[dict[str, Any]], metric: str, group_by: str | None, material: str | None) -> tuple[list[str], list[dict[str, Any]], str, str]:
+    labels = sorted({_chart_group_key(row, group_by) for row in rows})
+    title, unit = CHART_METRIC_LABELS[metric]
+    if metric in ("status_count", "status_share"):
+        statuses = ("GOOD", "REWORK", "REJECTED")
+        if group_by == "status":
+            values = [sum(row["quality"]["status"] == status for row in rows) for status in labels]
+            if metric == "status_share": values = [round(value / max(1, len(rows)) * 100, 2) for value in values]
+            return labels, [{"name": "Партий" if metric == "status_count" else "Доля, %", "values": values}], title, unit
+        if group_by not in (None, "material"):
+            values = [sum(_chart_group_key(row, group_by) == label for row in rows) for label in labels]
+            if metric == "status_share": values = [round(value / max(1, len(rows)) * 100, 2) for value in values]
+            return labels, [{"name": "Партий" if metric == "status_count" else "Доля, %", "values": values}], title, unit
+        series = []
+        for status in statuses:
+            values = [sum(row["material_type"] == label and row["quality"]["status"] == status for row in rows) for label in labels]
+            if metric == "status_share": values = [round(value / max(1, sum(row["material_type"] == label for row in rows)) * 100, 2) for label, value in zip(labels, values)]
+            series.append({"name": status, "values": values})
+        return labels, series, title, unit
+    if metric in ("rejection_batch_count", "rejection_raw_mass", "rejection_active_mass", "rejection_share"):
+        selected = [row for row in rows if row["quality"]["status"] in ("REWORK", "REJECTED")]
+        values = []
+        for label in labels:
+            selected_group = [row for row in selected if _chart_group_key(row, group_by) == label]
+            all_group = [row for row in rows if _chart_group_key(row, group_by) == label]
+            if metric == "rejection_batch_count": value = len(selected_group)
+            elif metric == "rejection_raw_mass": value = sum(row.get("remaining_raw_mass_kg", 0) for row in selected_group)
+            elif metric == "rejection_active_mass": value = sum(row.get("available_active_mass_kg", 0) for row in selected_group)
+            else: value = len(selected_group) / max(1, len(all_group)) * 100
+            values.append(value)
+        return labels, [{"name": title, "values": [round(value, 3) for value in values]}], title, unit
+    values = [sum(_chart_row_value(row, metric) for row in rows if _chart_group_key(row, group_by) == label) for label in labels]
+    if metric == "concentration": values = [round(sum(_chart_row_value(row, metric) for row in rows if _chart_group_key(row, group_by) == label) / max(1, sum(_chart_group_key(row, group_by) == label for row in rows)), 2) for label in labels]
+    if metric == "batch_count": values = [sum(_chart_group_key(row, group_by) == label for row in rows) for label in labels]
+    return labels, [{"name": title, "values": [round(value, 3) for value in values]}], title, unit
+
+
 def tool(name: str, args: dict[str, Any]) -> Any:
     con = db()
     if name == "check_batch_quality":
@@ -510,25 +595,52 @@ def tool(name: str, args: dict[str, Any]) -> Any:
         rows = con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else "") + " ORDER BY arrival_date, created_at, batch_id LIMIT ?", (material, limit) if material else (limit,)).fetchall(); con.close()
         return {"batches": [batch_dict(row) for row in rows], "limit": limit, "material_type": material, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"material_type": material, "limit": limit})}
     if name == "build_chart":
-        material = args.get("material_type"); chart_type = args.get("chart_type", "inventory")
+        material = args.get("material_type"); chart_type = args.get("chart_type", "inventory"); metric = args.get("metric")
+        legacy_metrics = {"inventory": "raw_mass", "quality": "status_count", "material_quality": "status_count", "concentration": "concentration"}
+        metric = metric or legacy_metrics.get(chart_type, "raw_mass")
+        group_by = args.get("group_by") or ("status" if chart_type == "quality" else "material")
+        plan_metrics = {"required_active_mass", "plan_available_active_mass", "planned_batch_count", "covered_active_mass", "deficit_active_mass", "coverage_percent", "raw_mass_used", "loss", "safe_growth_percent", "deficit_delta", "base_deficit_active_mass", "new_deficit_active_mass", "base_rework_batch_count", "new_rework_batch_count"}
+        if metric in plan_metrics:
+            con.close()
+            title, unit = CHART_METRIC_LABELS[metric]
+            requirements = args.get("requirements") or requirements_default()
+            policy = args.get("policy") or "hybrid"
+            if group_by == "policy":
+                policies = args.get("policies") or list(POLICIES)
+                labels = list(policies)
+                if metric in {"safe_growth_percent", "deficit_delta", "base_deficit_active_mass", "new_deficit_active_mass", "base_rework_batch_count", "new_rework_batch_count"}:
+                    changes = args.get("changes_percent") or {}
+                    if not changes: raise ValueError("Для графика сценария нужны changes_percent")
+                    scenarios = {name: tool("simulate_requirement_change", {"base_requirements": requirements, "changes_percent": changes, "policy": name}) for name in policies}
+                    key = {"safe_growth_percent": "safe_growth_percent", "deficit_delta": "deficit_delta_active_mass_kg", "base_deficit_active_mass": "base_deficit_active_mass_kg", "new_deficit_active_mass": "new_deficit_active_mass_kg", "base_rework_batch_count": "base_rework_batches", "new_rework_batch_count": "new_rework_batches"}[metric]
+                    values = []
+                    for name in labels:
+                        numbers = [float(item["comparison"][material].get(key, 0) or 0) for item in scenarios[name]["comparison"]]
+                        values.append(round(sum(numbers) / max(1, len(numbers)) if metric == "safe_growth_percent" else sum(numbers), 3))
+                    series = [{"name": title, "values": values}]
+                else:
+                    comparisons = {name: build_plan(requirements, name, True) for name in policies}
+                    key = {"required_active_mass": "required_active_mass_kg", "plan_available_active_mass": "available_active_mass_kg", "covered_active_mass": "covered_active_mass_kg", "deficit_active_mass": "deficit_active_mass_kg", "coverage_percent": "coverage_percent", "raw_mass_used": "raw_mass_used_kg", "loss": "loss_kg"}[metric]
+                    series = [{"name": title, "values": [round(sum(float(item.get(key, 0) or 0) for item in comparisons[name]["materials"].values()), 3) for name in labels]}]
+            elif metric in {"safe_growth_percent", "deficit_delta", "base_deficit_active_mass", "new_deficit_active_mass", "base_rework_batch_count", "new_rework_batch_count"}:
+                changes = args.get("changes_percent") or {}
+                if not changes: raise ValueError("Для графика сценария нужны changes_percent")
+                scenario = tool("simulate_requirement_change", {"base_requirements": requirements, "changes_percent": changes, "policy": policy})
+                labels = sorted(scenario["comparison"])
+                key = {"safe_growth_percent": "safe_growth_percent", "deficit_delta": "deficit_delta_active_mass_kg", "base_deficit_active_mass": "base_deficit_active_mass_kg", "new_deficit_active_mass": "new_deficit_active_mass_kg", "base_rework_batch_count": "base_rework_batches", "new_rework_batch_count": "new_rework_batches"}[metric]
+                series = [{"name": title, "values": [round(float(scenario["comparison"][name].get(key, 0) or 0), 3) for name in labels]}]
+            else:
+                plan = build_plan(requirements, policy, True)
+                labels, series = _chart_from_plan(plan, metric, group_by, title, unit)
+            return {"chart_id": str(uuid.uuid4()), "chart_type": "metric", "metric": metric, "group_by": group_by, "title": title, "labels": labels, "series": series, "unit": unit, "material_type": material, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"metric": metric, "group_by": group_by, "requirements": args.get("requirements"), "policy": args.get("policy") or "hybrid"})}
         rows = [batch_dict(row) for row in con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall()]; con.close()
-        labels = sorted({row["material_type"] for row in rows})
-        if chart_type == "material_quality":
-            statuses = ("GOOD", "REWORK", "REJECTED")
-            series = [{"name": status, "values": [sum(row["material_type"] == label and row["quality"]["status"] == status for row in rows) for label in labels]} for status in statuses]
-            title = "Количество партий по материалам и качеству"; unit = "batches"
-        elif chart_type == "quality":
-            labels = ["GOOD", "REWORK", "REJECTED"]
-            values = [sum(row["quality"]["status"] == status for row in rows) for status in labels]
-            series = [{"name": "Партий", "values": values}]; title = "Распределение по статусам"; unit = "batches"
-        elif chart_type == "concentration":
-            values = [round(sum(row["concentration_percent"] for row in rows if row["material_type"] == label) / max(1, sum(row["material_type"] == label for row in rows)), 2) for label in labels]
-            series = [{"name": "Средняя концентрация, %", "values": values}]; title = "Средняя концентрация по материалам"; unit = "%"
+        if chart_type == "inventory":
+            labels, series = _chart_payload(rows, "raw_mass", "material", material)[0:2]; series.append({"name": "Доступное активное вещество, кг", "values": _chart_payload(rows, "active_mass", "material", material)[1][0]["values"]}); title, unit = "Остатки по материалам", "kg"
         else:
-            raw = [round(sum(row["remaining_raw_mass_kg"] for row in rows if row["material_type"] == label), 3) for label in labels]
-            active = [round(sum(row["available_active_mass_kg"] for row in rows if row["material_type"] == label), 3) for label in labels]
-            series = [{"name": "Сырьё, кг", "values": raw}, {"name": "Активное, кг", "values": active}]; title = "Остатки по материалам"; unit = "kg"
-        return {"chart_id": str(uuid.uuid4()), "chart_type": chart_type, "title": title, "labels": labels, "series": series, "unit": unit, "material_type": material, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"material_type": material, "chart_type": chart_type})}
+            labels, series, title, unit = _chart_payload(rows, metric, group_by, material)
+            if chart_type == "material_quality": title = "Количество партий по материалам и качеству"
+            if chart_type == "quality": title = "Распределение по статусам"
+        return {"chart_id": str(uuid.uuid4()), "chart_type": chart_type, "metric": metric, "group_by": group_by, "title": title, "labels": labels, "series": series, "unit": unit, "material_type": material, "meta": snapshot_meta(TOOL_REGISTRY[name]["units"], {"material_type": material, "chart_type": chart_type, "metric": metric, "group_by": group_by})}
     if name == "classify_batches":
         material = args.get("material_type"); rows = con.execute("SELECT * FROM batches" + (" WHERE material_type=?" if material else ""), (material,) if material else ()).fetchall(); con.close(); counts = {"GOOD": 0, "REWORK": 0, "REJECTED": 0}
         for row in rows: counts[classify(dict(row))["status"]] += 1
@@ -737,6 +849,47 @@ def clarification_text(intent: dict[str, Any]) -> str:
     return "Уточните, пожалуйста: " + ", ".join(missing or ["параметры запроса"]) + "."
 
 
+def chart_request(message: str, material: str | None) -> dict[str, Any]:
+    normalized = message.lower()
+    quality = any(word in normalized for word in ("качеств", "статус"))
+    if any(word in normalized for word in ("брак", "отбрак", "доработ")):
+        metric = "rejection_share" if "дол" in normalized or "процент" in normalized else "rejection_active_mass" if "активн" in normalized else "rejection_raw_mass" if any(word in normalized for word in ("масс", "кг", "остат")) else "rejection_batch_count"
+    elif any(word in normalized for word in ("сценар", "изменен", "рост потребн", "увелич")):
+        metric = "safe_growth_percent" if any(word in normalized for word in ("безопас", "рост")) else "deficit_delta"
+    elif any(word in normalized for word in ("дефицит", "нехват", "не хват")):
+        metric = "deficit_active_mass"
+    elif any(word in normalized for word in ("покрыт", "обеспечен")):
+        metric = "coverage_percent"
+    elif any(word in normalized for word in ("потер", "восстановлен")):
+        metric = "loss" if "план" in normalized else "recovery_loss"
+    elif any(word in normalized for word in ("требуем", "потребн")):
+        metric = "required_active_mass"
+    elif "доступн" in normalized and "план" in normalized:
+        metric = "plan_available_active_mass"
+    elif any(word in normalized for word in ("выбранн", "отобранн")) or ("использован" in normalized and "парти" in normalized):
+        metric = "planned_batch_count"
+    elif "теорет" in normalized:
+        metric = "theoretical_active_mass"
+    elif any(word in normalized for word in ("активн", "действующ")):
+        metric = "active_mass"
+    elif "концентрац" in normalized:
+        metric = "concentration"
+    elif any(word in normalized for word in ("возраст", "старост", "старые", "старейш")):
+        metric = "age_days"
+    elif any(word in normalized for word in ("количеств", "сколько партий", "число партий")):
+        metric = "status_count" if quality else "batch_count"
+    elif "дол" in normalized and quality:
+        metric = "status_share"
+    elif quality:
+        metric = "status_count"
+    else:
+        metric = "raw_mass"
+    group_by = "status" if "по статус" in normalized else "batch" if any(word in normalized for word in ("по партиям", "каждой партии")) else "policy" if any(word in normalized for word in ("стратег", "политик", "fifo", "hybrid", "сравни")) else "material"
+    if group_by == "policy" and metric == "raw_mass": metric = "coverage_percent"
+    chart_type = "material_quality" if metric == "status_count" and group_by == "material" else "quality" if metric == "status_count" and group_by == "status" else "concentration" if metric == "concentration" and group_by == "material" else "metric"
+    return {"chart_type": chart_type, "metric": metric, "group_by": group_by, "material_type": material}
+
+
 def route_intent(message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
     normalized = message.lower()
     explanation = explanation_tool_for_message(message)
@@ -768,10 +921,20 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         con = db(); choices = [row[0] for row in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
         return {"intent": "CLARIFY", "tool_name": "check_batch_quality", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для проверки", "choices": choices}
     if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")) and not any(word in normalized for word in ("брак", "отбрак", "отчёт", "отчет", "отклон")):
-        quality_requested = any(word in normalized for word in ("статус", "качеств", "брак"))
-        material_quality = quality_requested and any(word in normalized for word in ("материал", "кажд", "колич", "по"))
-        chart_type = "material_quality" if material_quality else "quality" if quality_requested else "concentration" if "концентрац" in normalized else "inventory"
-        return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": {"chart_type": chart_type, "material_type": material}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация данных"}
+        arguments = chart_request(message, material)
+        if arguments["metric"] in {"deficit_active_mass", "coverage_percent", "loss"} or arguments["group_by"] == "policy":
+            requirements = parse_requirements(message)
+            if not requirements:
+                return {"intent": "CLARIFY", "tool_name": "build_chart", "arguments": arguments, "missing_fields": ["requirements"], "confidence": 0.92, "reason": "Для графика плана нужна потребность по активному веществу"}
+            arguments["requirements"] = requirements
+        if arguments["metric"] in {"safe_growth_percent", "deficit_delta"}:
+            changes = parse_changes(message)
+            if not changes:
+                return {"intent": "CLARIFY", "tool_name": "build_chart", "arguments": arguments, "missing_fields": ["changes_percent"], "confidence": 0.92, "reason": "Для графика сценария нужен процент изменения потребности"}
+            arguments["changes_percent"] = changes
+            arguments["requirements"] = parse_requirements(message) or requirements_default()
+            arguments["policy"] = "strict_fifo" if "fifo" in normalized else "max_concentration" if "концентрац" in normalized else "hybrid"
+        return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": arguments, "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация доступной метрики"}
     if any(word in normalized for word in ("самую стар", "самые стар", "старейш", "ранние партии")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_oldest_batches", "arguments": {"material_type": material, "limit": 5}, "missing_fields": [], "confidence": 0.98, "reason": "Запрошены партии с самой ранней датой поступления"}
     if any(word in normalized for word in ("классифиц", "классификац")):
@@ -780,6 +943,8 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         if not material and not any(word in normalized for word in ("все", "всем", "общ", "где")):
             return {"intent": "CLARIFY", "tool_name": "get_inventory_summary", "arguments": {}, "missing_fields": ["material_type"], "confidence": 0.95, "reason": "Нужно выбрать материал или все материалы", "choices": material_choices("Покажи остатки")}
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_inventory_summary", "arguments": {"material_type": material, "group_by": "material_and_status"}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошена сводка остатков"}
+    if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")) and any(word in normalized for word in ("брак", "отбрак", "доработ")) and not any(word in normalized for word in ("отчёт", "отчет", "сформируй отчёт", "сформируй отчет")):
+        return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": chart_request(message, material), "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация брака"}
     if any(word in normalized for word in ("брак", "отбрак", "доработ", "проблемн", "отклон")) and any(word in normalized for word in ("покажи", "сделай", "сформируй", "отчёт", "отчет", "парти")):
         if not material and not any(word in normalized for word in ("все", "всем")):
             prompt = "Создай отчёт по браку и построй график брака" if any(word in normalized for word in ("график", "диаграмм", "визуализ")) else "Покажи отчёт по браку"
@@ -858,10 +1023,12 @@ def compound_request(message: str, history: list[dict[str, str]]) -> list[tuple[
     args = intent["arguments"]
     material = args.get("material_type")
     if any(word in normalized for word in ("график", "диаграм", "визуализ")) and any(word in normalized for word in ("остат", "склад", "запас")):
-        return [("get_inventory_summary", {"material_type": material, "group_by": "material_and_status"}), ("build_chart", {"chart_type": "inventory", "material_type": material})]
+        return [("get_inventory_summary", {"material_type": material, "group_by": "material_and_status"}), ("build_chart", chart_request(message, material))]
     if any(word in normalized for word in ("график", "диаграм", "визуализ")) and any(word in normalized for word in ("брак", "отбрак", "отчёт", "отчет", "отклон")):
-        chart_type = "material_quality" if any(word in normalized for word in ("кажд", "количеств")) else "quality"
-        return [("generate_rejection_report", args), ("build_chart", {"chart_type": chart_type, "material_type": material})]
+        chart_args = chart_request(message, material)
+        if chart_args["metric"] == "rejection_batch_count" and not any(word in normalized for word in ("колич", "сколько", "число")):
+            chart_args["chart_type"] = "quality"
+        return [("generate_rejection_report", args), ("build_chart", chart_args)]
     if any(word in normalized for word in ("классифиц", "классификац")) and any(word in normalized for word in ("брак", "отчёт", "отчет", "отклон")):
         return [("classify_batches", args), ("generate_rejection_report", {"material_type": material, "include_rework": True, "include_rejected": True})]
     if any(word in normalized for word in ("проверь качество", "статус партии")) and any(word in normalized for word in ("детал", "карточ")) and args.get("batch_id"):
@@ -871,6 +1038,9 @@ def compound_request(message: str, history: list[dict[str, str]]) -> list[tuple[
             return [("build_weekly_plan", args), ("check_material_deficit", {"requirements": args["requirements"], "include_rework": args.get("allow_rework", True)})]
         policies = [p for p, aliases in (("strict_fifo", ("fifo",)), ("hybrid", ("hybrid",)), ("max_concentration", ("концентрац", "max concentration"))) if any(alias in normalized for alias in aliases)] or list(POLICIES)
         return [("build_weekly_plan", args), ("compare_allocation_policies", {"requirements": args["requirements"], "policies": policies})]
+    if "план" in normalized and any(word in normalized for word in ("график", "диаграм", "визуализ")) and args.get("requirements"):
+        chart_args = chart_request(message, material); chart_args.update({"requirements": args["requirements"], "policy": args.get("policy", "hybrid")})
+        return [("build_weekly_plan", args), ("build_chart", chart_args)]
     return None
 
 
@@ -893,7 +1063,8 @@ def routed_tool_result(message: str, history: list[dict[str, str]]) -> tuple[str
             return compound[0][0], data, trace
         if name == "generate_rejection_report" and any(word in message.lower() for word in ("график", "диаграмм", "визуализ")):
             report = tool(name, args)
-            chart_args = {"chart_type": "quality", "material_type": args.get("material_type")}
+            chart_args = chart_request(message, args.get("material_type"))
+            if chart_args["metric"] == "rejection_batch_count": chart_args["chart_type"] = "quality"
             chart = tool("build_chart", chart_args)
             trace = [
                 {"tool": name, "arguments": args, "status": "success", "source": "router"},
