@@ -254,6 +254,19 @@ def plan_confirm(plan_id: str, payload: RequirementIn, request: Request) -> Any:
     con.close(); return {"plan_id": plan_id, "status": "confirmed", "plan": plan}
 
 
+@app.post("/api/v1/plans/production/download")
+def production_plan_download(payload: RequirementIn, request: Request) -> StreamingResponse:
+    current_user(request)
+    plan = build_plan(payload.requirements, PRODUCTION_POLICY, payload.allow_rework)
+    fields, rows = production_plan_csv_rows(plan)
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(rows)
+    filename = f'production-weekly-plan-{datetime.utcnow().date().isoformat()}.csv'
+    return StreamingResponse(iter([output.getvalue().encode("utf-8-sig")]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @app.post("/api/v1/policies/compare")
 def compare(payload: RequirementIn, request: Request) -> Any:
     current_user(request)

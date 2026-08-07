@@ -41,12 +41,11 @@ def runtime_db_config() -> tuple[str, str]:
 MATERIALS = ("A", "B", "C")
 MATERIAL_CODE = re.compile(r"^[A-Z][A-Z0-9_-]{0,15}$")
 POLICIES = ("strict_fifo", "max_concentration", "hybrid")
+PRODUCTION_POLICY = "hybrid"
 DEFAULT_RULES = {
     "A": (28.0, 23.0, 1.0, 0.9, 0.0),
     "B": (30.0, 25.0, 1.0, 0.9, 0.0),
     "C": (35.0, 25.0, 1.0, 0.9, 0.0),
-    "D": (32.0, 24.0, 1.0, 0.9, 0.0),
-    "E": (28.0, 22.0, 1.0, 0.9, 0.0),
 }
 
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
@@ -212,7 +211,8 @@ def init_db() -> None:
     INSERT INTO settings(key, value) VALUES ('registration_open', '1') ON CONFLICT(key) DO NOTHING;
     INSERT INTO settings(key, value) VALUES ('data_version', '1') ON CONFLICT(key) DO NOTHING;
     """)
-    if DATABASE_URL.startswith("postgres"):
+    database_url, _ = runtime_db_config()
+    if database_url.startswith("postgres"):
         column_exists = con.execute("SELECT 1 FROM information_schema.columns WHERE table_name='plan_owners' AND column_name='preview_data_version'").fetchone()
     else:
         column_exists = next((row for row in con.execute("PRAGMA table_info(plan_owners)").fetchall() if row[1] == "preview_data_version"), None)
@@ -221,6 +221,12 @@ def init_db() -> None:
     for material, values in DEFAULT_RULES.items():
         con.execute("INSERT INTO quality_rules VALUES (?,?,?,?,?,?) ON CONFLICT(material_type) DO NOTHING", (material, *values))
         con.execute("INSERT INTO requirements VALUES (?,?) ON CONFLICT(material_type) DO NOTHING", (material, 3000.0))
+    if not con.execute("SELECT 1 FROM settings WHERE key='legacy_extra_materials_cleaned'").fetchone():
+        for material in ("D", "E"):
+            if not con.execute("SELECT 1 FROM batches WHERE material_type=? LIMIT 1", (material,)).fetchone():
+                con.execute("DELETE FROM requirements WHERE material_type=?", (material,))
+                con.execute("DELETE FROM quality_rules WHERE material_type=?", (material,))
+        con.execute("INSERT INTO settings(key, value) VALUES ('legacy_extra_materials_cleaned', '1')")
     if con.execute("SELECT COUNT(*) FROM batches").fetchone()[0] == 0:
         demo = [
             ("A-001", "A", 5000, 24.5, "2026-08-01", "Поставщик-1", "Основной", None, "Демо", 5000, "demo", None, datetime.utcnow().isoformat()),
@@ -477,6 +483,8 @@ def build_plan(requirements: dict[str, float], policy: str = "hybrid", allow_rew
     materials = tuple(sorted(set(material_codes()) | set(requirements)))
     by_material = {m: [r for r in all_rows if r["material_type"] == m] for m in materials}
     result = {"policy": policy, "requirements": requirements, "materials": {}, "warnings": [], "meta": snapshot_meta({"requirements": "kg_active", "raw_mass": "kg_raw", "active_mass": "kg_active"}, {"policy": policy, "allow_rework": allow_rework, "requirements": requirements})}
+    if policy == PRODUCTION_POLICY:
+        result["meta"]["production_baseline"] = "GOOD FIFO -> REWORK concentration DESC -> deficit"
     for material in materials:
         required = max(0.0, float(requirements.get(material, 0)))
         need = required; items = []; available = 0.0
@@ -499,6 +507,33 @@ def build_plan(requirements: dict[str, float], policy: str = "hybrid", allow_rew
         result["materials"][material] = {"required_active_mass_kg": round(required, 3), "available_active_mass_kg": round(available, 3), "covered_active_mass_kg": round(covered, 3), "deficit_active_mass_kg": round(max(0, need), 3), "coverage_percent": round(covered / required * 100, 2) if required else 100.0, "items": items, "raw_mass_used_kg": round(sum(i["raw_mass_used_kg"] for i in items), 3), "loss_kg": round(sum(i["loss_kg"] for i in items), 3), "selection_explanation": f"Стратегия {policy}; отобрано партий: {len(items)}"}
         if need > 1e-9: result["warnings"].append(f"Дефицит материала {material}: {need:.3f} кг активного вещества")
     return result
+
+
+PRODUCTION_PLAN_FIELDS = (
+    "plan_type", "policy", "material_type", "required_active_mass_kg", "available_active_mass_kg",
+    "covered_active_mass_kg", "deficit_active_mass_kg", "coverage_percent", "selection_rank",
+    "batch_id", "status", "arrival_date", "concentration_percent", "raw_mass_used_kg",
+    "active_mass_kg", "loss_kg", "selection_reason",
+)
+
+
+def production_plan_csv_rows(plan: dict[str, Any]) -> tuple[tuple[str, ...], list[dict[str, Any]]]:
+    rows = []
+    for material, summary in plan["materials"].items():
+        common = {"plan_type": "production_weekly", "policy": PRODUCTION_POLICY, "material_type": material}
+        common.update({field: summary.get(field, "") for field in (
+            "required_active_mass_kg", "available_active_mass_kg", "covered_active_mass_kg",
+            "deficit_active_mass_kg", "coverage_percent",
+        )})
+        items = summary.get("items", []) or [{}]
+        for item in items:
+            row = {**common, "selection_rank": item.get("selection_rank", ""), "batch_id": item.get("batch_id", ""),
+                   "status": item.get("status", ""), "arrival_date": item.get("arrival_date", ""),
+                   "concentration_percent": item.get("concentration_percent", ""),
+                   "raw_mass_used_kg": item.get("raw_mass_used_kg", ""), "active_mass_kg": item.get("active_mass_kg", ""),
+                   "loss_kg": item.get("loss_kg", ""), "selection_reason": item.get("selection_reason", "")}
+            rows.append(row)
+    return PRODUCTION_PLAN_FIELDS, rows
 
 
 def requirements_default() -> dict[str, float]:

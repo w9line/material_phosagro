@@ -6,6 +6,7 @@
 - `GOOD`, `REWORK` and `REJECTED` are derived from the current quality rules.
 - Rejected batches are never selected by a plan. Rework is selected only when the tool explicitly allows it.
 - Preview calculations do not alter inventory. Confirmation is explicit, authenticated, owned by the preview creator, transactional and idempotent.
+- Production weekly baseline is fixed: select `GOOD` batches by FIFO, then `REWORK` batches by descending concentration, and report any uncovered requirement as active-substance deficit. The production CSV contains the selected batches plus per-material coverage and deficit fields.
 
 ## Классификация и активное вещество
 
@@ -19,4 +20,4 @@
 
 Теоретическое активное вещество считается как `raw_mass_kg × concentration_percent / 100`. Доступное активное вещество считается от текущего остатка: `remaining_raw_mass_kg × concentration_percent / 100 × recovery_factor`. Поэтому у GOOD по умолчанию коэффициент восстановления 1.0, у REWORK — 0.9, у REJECTED — 0.
 
-Раньше список был жёстко ограничен `A/B/C`, включая генератор. Сейчас в стартовом реестре есть `A/B/C/D/E`, а новый материал можно добавить вручную, импортом или через настройку правила: код должен начинаться с латинской буквы и содержать до 16 безопасных символов. Для нового кода создаётся правило по умолчанию; его пороги затем можно изменить.
+Стартовый реестр и генератор используют только `A/B/C`. Новый материал можно добавить вручную, импортом или через настройку правила: код должен начинаться с латинской буквы и содержать до 16 безопасных символов. Для нового кода создаётся правило по умолчанию; его пороги затем можно изменить.
