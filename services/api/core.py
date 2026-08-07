@@ -900,6 +900,8 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_inventory_summary", "arguments": {"material_type": material, "group_by": "material_and_status"}, "missing_fields": [], "confidence": 0.98, "reason": "Явно запрошена сводка остатков"}
     if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")) and any(word in normalized for word in ("брак", "отбрак", "доработ")) and not any(word in normalized for word in ("отчёт", "отчет", "сформируй отчёт", "сформируй отчет")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": chart_request(message, material), "missing_fields": [], "confidence": 0.98, "reason": "Запрошена визуализация брака"}
+    if any(phrase in normalized for phrase in ("процент брака", "доля брака", "брак по каждому", "брак по материал")):
+        return {"intent": "EXECUTE_TOOL", "tool_name": "build_chart", "arguments": chart_request(message, material), "missing_fields": [], "confidence": 0.98, "reason": "Запрошена метрика брака по материалам"}
     if any(word in normalized for word in ("брак", "отбрак", "доработ", "проблемн", "отклон")) and any(word in normalized for word in ("покажи", "сделай", "сформируй", "отчёт", "отчет", "парти")):
         if not material and not any(word in normalized for word in ("все", "всем")):
             prompt = "Создай отчёт по браку и построй график брака" if any(word in normalized for word in ("график", "диаграмм", "визуализ")) else "Покажи отчёт по браку"
@@ -927,13 +929,13 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         if not mass_basis(message): return {"intent": "CLARIFY", "tool_name": "compare_allocation_policies", "arguments": {"requirements": requirements}, "missing_fields": ["mass_basis"], "confidence": 0.94, "reason": "Нужно различить массу сырья и активного вещества"}
         policies = [p for p, aliases in (("strict_fifo", ("fifo", "strict_fifo")), ("hybrid", ("hybrid",)), ("max_concentration", ("концентрац", "max_concentration"))) if any(alias in normalized for alias in aliases)] or list(POLICIES)
         return {"intent": "EXECUTE_TOOL", "tool_name": "compare_allocation_policies", "arguments": {"requirements": requirements, "policies": policies, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.96, "reason": "Указаны потребность и стратегии"}
-    if any(word in normalized for word in ("сценар", "смоделируй", "изменение спроса", "что будет, если", "рост")):
+    if any(word in normalized for word in ("сценар", "смоделируй", "изменение спроса", "что будет, если", "что будет если", "рост")):
         changes = parse_changes(message)
-        policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if any(alias in normalized for alias in ("концентрац", "max concentration", "max_concentration")) else "hybrid" if "hybrid" in normalized else None
-        missing_fields = ([] if changes else ["changes_percent"]) + ([] if policy else ["policy"])
+        policy = "strict_fifo" if "fifo" in normalized and "hybrid" not in normalized else "max_concentration" if any(alias in normalized for alias in ("концентрац", "max concentration", "max_concentration")) else "hybrid"
+        missing_fields = [] if changes else ["changes_percent"]
         if missing_fields:
             return {"intent": "CLARIFY", "tool_name": "simulate_requirement_change", "arguments": {"changes_percent": changes}, "missing_fields": missing_fields, "confidence": 0.92, "reason": "Для сценария не хватает процента изменения и политики", "choices": [{"label": "Hybrid", "value": "Смоделируй сценарий с policy hybrid"}, {"label": "Strict FIFO", "value": "Смоделируй сценарий с policy strict_fifo"}]}
-        return {"intent": "EXECUTE_TOOL", "tool_name": "simulate_requirement_change", "arguments": {"base_requirements": {}, "changes_percent": changes, "policy": policy}, "missing_fields": [], "confidence": 0.95, "reason": "Указаны параметры сценария"}
+        return {"intent": "EXECUTE_TOOL", "tool_name": "simulate_requirement_change", "arguments": {"base_requirements": requirements_default(), "changes_percent": changes, "policy": policy}, "missing_fields": [], "confidence": 0.95, "reason": "Указаны параметры сценария, применены сохранённая потребность и hybrid по умолчанию"}
     if any(word in normalized for word in ("привет", "что ты умеешь", "помоги", "что можешь", "как пользоваться")):
         return {"intent": "GENERAL_HELP", "tool_name": None, "arguments": {}, "missing_fields": [], "confidence": 0.98, "reason": "Общий вопрос без бизнес-команды"}
     return {"intent": "GENERAL_HELP", "tool_name": None, "arguments": {}, "missing_fields": [], "confidence": 0.55, "reason": "Не найдено однозначной команды на выполнение"}
