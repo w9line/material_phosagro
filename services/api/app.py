@@ -583,11 +583,11 @@ def _chart_payload(rows: list[dict[str, Any]], metric: str, group_by: str | None
 def tool(name: str, args: dict[str, Any]) -> Any:
     con = db()
     if name == "check_batch_quality":
-        row = con.execute("SELECT * FROM batches WHERE batch_id=?", (args["batch_id"],)).fetchone(); con.close()
+        row = con.execute("SELECT * FROM batches WHERE LOWER(batch_id)=LOWER(?)", (args["batch_id"],)).fetchone(); con.close()
         if not row: raise ValueError("batch not found")
         return batch_dict(row)
     if name == "get_batch_details":
-        row = con.execute("SELECT * FROM batches WHERE batch_id=?", (args["batch_id"],)).fetchone(); con.close()
+        row = con.execute("SELECT * FROM batches WHERE LOWER(batch_id)=LOWER(?)", (args["batch_id"],)).fetchone(); con.close()
         if not row: raise ValueError("batch not found")
         return batch_dict(row)
     if name == "get_oldest_batches":
@@ -676,6 +676,8 @@ TOOLS = tuple(TOOL_REGISTRY)
 
 def local_agent(message: str) -> tuple[str, str, Any, list[dict[str, Any]]]:
     intent = route_intent(message)
+    if intent["intent"] == "EXPLAIN_TOOL" and intent.get("tool_name"):
+        return "offline", registry_explanation(intent["tool_name"]), None, []
     if intent["intent"] != "EXECUTE_TOOL":
         if intent["intent"] == "CLARIFY": return "offline", "Нужно уточнить: " + ", ".join(intent.get("missing_fields", [])), None, []
         return "offline", "Я работаю с партиями, остатками, дефицитом, планом и отчётами. Для расчёта сформулируйте явную команду.", None, []
@@ -699,7 +701,7 @@ def local_agent(message: str) -> tuple[str, str, Any, list[dict[str, Any]]]:
     if name == "check_batch_quality":
         answer = f"Партия {data['batch_id']}: {data['quality']['status']}, концентрация {data['concentration_percent']}%. {data['quality']['reason']}."
     else:
-        answer = f"Режим без LLM: выполнен инструмент {name}. Результат доступен в блоке расчёта."
+        answer = summarize_tool_result(data)
     return name, answer, data, [{"tool": name, "arguments": args, "status": "success"}]
 
 
@@ -1106,17 +1108,19 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
     if intent["intent"] == "CLARIFY": return "assistant", clarification_text(intent), {"choices": intent.get("choices", [])}, []
     routed = routed_tool_result(message, history)
     if routed or intent["intent"] == "EXPLAIN_TOOL" or (intent["intent"] == "GENERAL_HELP" and not llm_may_select_tool(message)):
-        name, data, trace = routed or (None, None, [])
+        name, data, trace = routed or (intent.get("tool_name"), None, [])
         _, messages = explanation_prompt(message, history, name, data)
         body = {"model": os.getenv("LLM_MODEL", "openai/gpt-5-nano"), "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")), "max_tokens": int(os.getenv("LLM_EXPLAIN_MAX_TOKENS", "650")), "messages": messages}
         req = URLRequest(base + "/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
         try:
             with urlopen(req, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))) as response: result = json.load(response)
         except Exception:
-            return "offline", summarize_tool_result(data), data, trace
+            answer = registry_explanation(name) if intent["intent"] == "EXPLAIN_TOOL" and name else summarize_tool_result(data)
+            return "offline", answer, data, trace
         content = (result["choices"][0]["message"].get("content") or "").strip()
+        if content == "Расчёт завершён. Подробности доступны в результате инструмента.": content = registry_explanation(name) if intent["intent"] == "EXPLAIN_TOOL" and name else summarize_tool_result(data)
         if data and not answer_numbers_are_grounded(content, data): content = summarize_tool_result(data)
-        return "llm", content or summarize_tool_result(data), data, trace
+        return "llm", content or (registry_explanation(name) if intent["intent"] == "EXPLAIN_TOOL" and name else summarize_tool_result(data)), data, trace
     explanation_tool = explanation_tool_for_message(message)
     system = """Ты — AI-технолог системы контроля качества сырья. Отвечай по-русски. Все данные и расчёты получай только через инструменты. Не придумывай партии и числа. После tool call объясни результат простыми словами, отделяй массу сырья от массы активного вещества. Preview-план не подтверждай сам. Всегда заверши ответ коротким понятным текстом; пустой ответ запрещён."""
     if explanation_tool: system += f" Пользователь просит объяснить инструмент {explanation_tool}. {registry_explanation(explanation_tool)} Расскажи назначение, когда он нужен, параметры и результат. Не запускай инструмент и не выдумывай поля. Ответ краткий — до 120 слов."
@@ -1185,7 +1189,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     routed = routed_tool_result(message, history)
     if routed or intent["intent"] == "EXPLAIN_TOOL" or (intent["intent"] == "GENERAL_HELP" and not llm_may_select_tool(message)):
-        name, data, trace = routed or (None, None, [])
+        name, data, trace = routed or (intent.get("tool_name"), None, [])
         if trace:
             yield {"type": "tool", "tool": trace[-1]["tool"], "status": trace[-1]["status"]}
         _, messages = explanation_prompt(message, history, name, data)
@@ -1202,11 +1206,12 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                     delta = json.loads(payload).get("choices", [{}])[0].get("delta", {}).get("content") or ""
                     if delta: answer_parts.append(delta)
         except Exception:
-            answer = summarize_tool_result(data)
+            answer = registry_explanation(name) if intent["intent"] == "EXPLAIN_TOOL" and name else summarize_tool_result(data)
             yield {"type": "token", "text": answer}
             yield {"type": "done", "response": {"mode": "offline", "answer": answer, "result": data, "tool_calls": trace}}
             return
         answer = "".join(answer_parts).strip()
+        if answer == "Расчёт завершён. Подробности доступны в результате инструмента.": answer = registry_explanation(name) if intent["intent"] == "EXPLAIN_TOOL" and name else summarize_tool_result(data)
         if data and not answer_numbers_are_grounded(answer, data):
             answer = summarize_tool_result(data)
             yield {"type": "replace", "text": answer}
@@ -1291,6 +1296,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                     answer_parts.append(text)
                     yield {"type": "token", "text": text}
             answer = "".join(answer_parts).strip()
+            if answer == "Расчёт завершён. Подробности доступны в результате инструмента.": answer = summarize_tool_result(last_data)
             if last_data and not answer_numbers_are_grounded(answer, last_data):
                 answer = summarize_tool_result(last_data)
                 yield {"type": "replace", "text": answer}
