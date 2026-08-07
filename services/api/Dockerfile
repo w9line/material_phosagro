@@ -3,6 +3,8 @@ WORKDIR /app
 COPY services/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/api/app.py ./app.py
+COPY services/api/core.py ./core.py
+COPY services/api/agent.py ./agent.py
 COPY services/api/tests ./tests
 COPY apps/web ./web
 COPY scripts/run_agent_eval.py ./scripts/run_agent_eval.py

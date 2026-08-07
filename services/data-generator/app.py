@@ -24,7 +24,7 @@ class GenerateIn(BaseModel):
     scenario: str = "balanced"
     count: int = Field(100, ge=1, le=100000)
     seed: int = 42
-    materials: list[str] = Field(default_factory=lambda: ["A", "B", "C", "D", "E"], min_length=1, max_length=30)
+    materials: list[str] = Field(default_factory=lambda: ["A", "B", "C"], min_length=1, max_length=30)
 
     @field_validator("materials")
     @classmethod
@@ -69,7 +69,7 @@ def generate(payload: GenerateIn):
         rows.append({"batch_id": f"{material}-{generation_id[:8]}-{i+1:04d}", "material_type": material, "raw_mass_kg": round(rng.uniform(500, 10000), 3), "concentration_percent": round(concentration, 3), "arrival_date": (start + timedelta(days=rng.randrange(220))).isoformat(), "supplier": f"Поставщик-{rng.randint(1, 5)}", "warehouse": f"Зона-{material}"})
     if payload.scenario == "invalid_rows" and rows:
         rows[0]["raw_mass_kg"] = -1; rows[1]["concentration_percent"] = 101; rows[2]["batch_id"] = rows[1]["batch_id"]
-    thresholds = {"A": (28, 23), "B": (30, 25), "C": (35, 25), "D": (32, 24), "E": (28, 22)}
+    thresholds = {"A": (28, 23), "B": (30, 25), "C": (35, 25)}
     rules = [{"material_type": m, "good_threshold_percent": thresholds.get(m, thresholds["A"])[0], "rework_threshold_percent": thresholds.get(m, thresholds["A"])[1], "good_recovery_factor": 1, "rework_recovery_factor": 0.9, "reject_recovery_factor": 0} for m in materials]
     req = [{"material_type": m, "required_active_mass_kg": 3000} for m in materials]
     manifest = {"seed": payload.seed, "scenario": payload.scenario, "materials": materials, "rows": len(rows), "synthetic": True, "generated_at": date.today().isoformat(), "warning": "Данные синтетические и не являются нормативами производства."}
