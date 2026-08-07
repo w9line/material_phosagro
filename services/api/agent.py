@@ -100,7 +100,9 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                     if not line.startswith("data:"): continue
                     payload = line[5:].strip()
                     if payload == "[DONE]": break
-                    delta = json.loads(payload).get("choices", [{}])[0].get("delta", {}).get("content") or ""
+                    choices = json.loads(payload).get("choices") or []
+                    if not choices: continue
+                    delta = choices[0].get("delta", {}).get("content") or ""
                     if delta: answer_parts.append(delta)
         except Exception as exc:
             raise RuntimeError(f"VseLLM не ответил: {exc}") from exc
@@ -182,7 +184,9 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                 payload = line[5:].strip()
                 if payload == "[DONE]": break
                 chunk = json.loads(payload)
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                choices = chunk.get("choices") or []
+                if not choices: continue
+                delta = choices[0].get("delta", {})
                 text = delta.get("content") or ""
                 if text:
                     answer_parts.append(text)

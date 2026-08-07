@@ -17,6 +17,14 @@ def startup() -> None: init_db()
 def index() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "index.html")
 
 
+@app.get("/styles.css", include_in_schema=False)
+def styles() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "styles.css", media_type="text/css")
+
+
+@app.get("/app.js", include_in_schema=False)
+def javascript() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "app.js", media_type="application/javascript")
+
+
 @app.post("/api/v1/auth/register")
 def register(payload: AuthIn) -> dict[str, Any]:
     username = payload.username.strip()
