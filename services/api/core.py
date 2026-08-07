@@ -810,6 +810,24 @@ def guarded_intent(message: str) -> dict[str, Any] | None:
     }
 
 
+def trusted_history(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """Drop prompt-injected user turns and the assistant replies they contaminated."""
+    clean: list[dict[str, str]] = []
+    tainted = False
+    for item in history or []:
+        content = (item.get("content") or "").strip()
+        if item.get("role") == "user":
+            tainted = bool(guard_reason(content))
+            if tainted:
+                continue
+        elif tainted:
+            tainted = False
+            continue
+        if content:
+            clean.append({"role": item.get("role", "user"), "content": content[:700]})
+    return clean
+
+
 def normalize_material_aliases(message: str) -> str:
     return re.sub(r"(?<!\w)а(?!\w)", "a", re.sub(r"(?<!\w)в(?!\w)", "b", re.sub(r"(?<!\w)с(?!\w)", "c", message)))
 
@@ -906,6 +924,7 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
     guarded = guarded_intent(message)
     if guarded:
         return guarded
+    history = trusted_history(history)
     normalized = message.lower()
     explanation = explanation_tool_for_message(message)
     if explanation:
@@ -1019,7 +1038,7 @@ def explanation_tool_for_message(message: str) -> str | None:
 def compact_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
     """Keep only the small conversational window needed for an ambiguous request."""
     compact = []
-    for item in history[-6:]:
+    for item in trusted_history(history)[-6:]:
         content = (item.get("content") or "").strip()
         if content:
             compact.append({"role": item["role"], "content": content[:700]})
@@ -1027,6 +1046,7 @@ def compact_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def llm_context(history: list[dict[str, str]]) -> str:
+    history = trusted_history(history)
     last_user = next((item["content"] for item in reversed(history) if item.get("role") == "user"), "")
     return json.dumps({
         "last_user_request": last_user[:700],
