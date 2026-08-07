@@ -1179,6 +1179,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
     key = os.getenv("LLM_API_KEY")
     if not key:
         name, answer, data, trace = local_agent(message)
+        yield {"type": "token", "text": answer}
         yield {"type": "done", "response": {"mode": "offline", "answer": answer, "result": data, "tool_calls": trace}}
         return
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -1206,9 +1207,12 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
             yield {"type": "done", "response": {"mode": "offline", "answer": answer, "result": data, "tool_calls": trace}}
             return
         answer = "".join(answer_parts).strip()
-        if data and not answer_numbers_are_grounded(answer, data): answer = summarize_tool_result(data)
-        answer = answer or summarize_tool_result(data)
-        yield {"type": "token", "text": answer}
+        if data and not answer_numbers_are_grounded(answer, data):
+            answer = summarize_tool_result(data)
+            yield {"type": "replace", "text": answer}
+        elif not answer:
+            answer = summarize_tool_result(data)
+            yield {"type": "token", "text": answer}
         yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": data, "tool_calls": trace}}
         return
     explanation_tool = explanation_tool_for_message(message)
@@ -1285,10 +1289,14 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
                 text = delta.get("content") or ""
                 if text:
                     answer_parts.append(text)
+                    yield {"type": "token", "text": text}
             answer = "".join(answer_parts).strip()
-            if last_data and not answer_numbers_are_grounded(answer, last_data): answer = summarize_tool_result(last_data)
-            answer = answer or summarize_tool_result(last_data)
-            yield {"type": "token", "text": answer}
+            if last_data and not answer_numbers_are_grounded(answer, last_data):
+                answer = summarize_tool_result(last_data)
+                yield {"type": "replace", "text": answer}
+            elif not answer:
+                answer = summarize_tool_result(last_data)
+                yield {"type": "token", "text": answer}
             yield {"type": "done", "response": {"mode": "llm", "answer": answer, "result": last_data, "tool_calls": trace}}
             return
     answer = "Не удалось завершить расчёт за допустимое число шагов."

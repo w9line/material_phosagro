@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Raw Material / Quality operations</title>
+<title>PhosAgro / Raw Control</title>
 <style>
 :root{--canvas:#f5f5f5;--paper:#fff;--surface:#fafafa;--ink:#0a0a0a;--ink-soft:#171717;--mid:#737373;--line:#e5e5e5;--red:#e7000b;--radius-card:24px;--radius-control:18px;--shadow:0 0 0 1px rgba(23,23,23,.05),0 1px 3px rgba(0,0,0,.1),0 1px 2px -1px rgba(0,0,0,.1);--font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 *{box-sizing:border-box}html{background:var(--canvas);scroll-behavior:smooth}body{margin:0;background:var(--canvas);color:var(--ink);font:14px/1.43 var(--font);font-feature-settings:"ss01" 1,"cv11" 1}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.55}.hidden{display:none!important}.muted{color:var(--mid)}.eyebrow,.caption{color:var(--mid);font-size:12px;line-height:1.33;letter-spacing:.6px;text-transform:uppercase}.caption{font-weight:600}.danger{color:var(--red)!important}.status-good{color:var(--ink-soft)}.status-rework{color:var(--mid)}.status-rejected{color:var(--red)}
@@ -27,14 +27,17 @@
 .account-card{display:flex;align-items:center;gap:16px;max-width:720px}.account-card h2{margin:4px 0;font-size:24px}.account-avatar{display:grid;place-items:center;width:52px;height:52px;border-radius:17px;background:var(--ink);color:#fff;font-size:20px;font-weight:600}.account-card .danger-button{margin-left:auto}
 @media(max-width:720px){.chat-layout{grid-template-columns:1fr;min-height:0}.chat-layout.sidebar-collapsed{grid-template-columns:1fr}.chat-sidebar{order:2}.chat-layout.sidebar-collapsed .chat-sidebar{display:none}.chat-main{min-height:calc(100vh - 170px)}.messages{min-height:380px;max-height:none}.chat-head h2{font-size:20px}.message{max-width:94%}.chat-actions{display:none}.quick{margin-left:-4px;margin-right:-4px}.composer-hint{display:none}.chart-modal{padding:12px}.chart-modal-card{padding:16px;border-radius:20px;max-height:calc(100vh - 24px)}}
 @media(max-width:1000px){.topbar{display:none}}
+/* Keep chat controls visible while messages scroll inside the workspace. */
+.chat-layout{height:calc(100vh - 220px);min-height:520px;overflow:hidden}.chat-sidebar{min-height:0}.chat-sidebar .card{overflow:hidden}.chat-main{height:100%;min-height:0;overflow:hidden}.messages{min-height:0;max-height:none;overflow:auto}
+@media(max-width:720px){.chat-layout{height:calc(100dvh - 190px);min-height:480px}.chat-main{min-height:0}.messages{min-height:0;max-height:none}}
 </style>
 </head>
 <body>
 <section id="authScreen" class="auth-screen">
   <div class="auth-shell">
     <div class="auth-copy">
-      <div class="brand"><span class="brand-mark">RM</span>RAW MATERIAL</div>
-      <div class="eyebrow" style="margin-top:54px">Quality operations / 01</div>
+      <div class="brand"><span class="brand-mark">PA</span>PHOSAGRO / RAW CONTROL</div>
+      <div class="eyebrow" style="margin-top:54px">Quality &amp; planning / 01</div>
       <h1>Сырьё<br>под контролем.</h1>
       <p>Проверка качества партий, прозрачное планирование и ассистент для технологических решений — в одном рабочем пространстве.</p>
       <div class="auth-notes"><span class="badge badge-solid">PostgreSQL</span><span class="badge">Deterministic rules</span><span class="badge">VseLLM agent</span></div>
@@ -55,8 +58,7 @@
 
 <div id="appShell" class="app-shell hidden">
   <aside class="sidebar">
-    <div class="sidebar-brand"><div class="brand"><span class="brand-mark">RM</span>RAW MATERIAL</div><small>Quality operations</small></div>
-    <div class="workspace"><span class="workspace-dot"></span><div><strong>Основной склад</strong><span>Рабочее пространство</span></div></div>
+    <div class="sidebar-brand"><div class="brand"><span class="brand-mark">PA</span>PHOSAGRO / RAW CONTROL</div><small>Quality &amp; planning</small></div>
     <nav class="side-nav" aria-label="Основная навигация">
       <button class="active" data-page="overview"><span class="nav-index">01</span>Обзор</button>
       <button data-page="data"><span class="nav-index">02</span>Партии и данные</button>
@@ -65,7 +67,7 @@
       <button data-page="assistant"><span class="nav-index">05</span>Ассистент</button>
       <button id="accountNav" data-page="account"><span class="nav-index">06</span><span id="accountNavLabel">Аккаунт</span></button>
     </nav>
-    <div class="sidebar-footer"><strong>RAW / MATERIAL</strong><span>Deterministic quality control</span></div>
+    <div class="sidebar-footer"><strong>PHOSAGRO / RAW CONTROL</strong><span>Quality &amp; planning</span></div>
   </aside>
   <div class="main-shell">
     <header class="topbar">
@@ -107,7 +109,7 @@
       </section>
 
       <section id="admin" class="page admin-only hidden"><div class="page-heading"><div><div class="eyebrow">Restricted workspace</div><h1>Администрирование.</h1><p>Контроль доступа, регистраций и просмотр рабочих чатов аккаунтов.</p></div></div><div class="admin-layout"><div class="admin-stack"><div class="card"><div class="card-header"><div><h2>Регистрация</h2><p>Управляет созданием новых аккаунтов.</p></div><input id="registrationOpen" class="switch" type="checkbox" onchange="toggleRegistration()"></div><div class="setting-row"><span class="muted">Новые регистрации</span><span id="registrationLabel" class="badge"></span></div></div><div class="card"><div class="card-header"><div><h2>Пользователи</h2><p>Заблокированный аккаунт теряет активные сессии.</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Логин</th><th>Роль</th><th>Статус</th><th></th></tr></thead><tbody id="adminUsers"></tbody></table></div></div></div><div class="card"><div class="card-header"><div><h2>Чаты аккаунтов</h2><p>Выберите чат, чтобы посмотреть историю сообщений.</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Пользователь</th><th>Чат</th><th>Обновлён</th></tr></thead><tbody id="adminChats"></tbody></table></div><pre id="adminChatView" class="admin-chat-view">Выберите чат.</pre></div></div></section>
-      <div class="footer-note">RAW / MATERIAL · Synthetic demo values are not production norms.</div>
+      <div class="footer-note">PHOSAGRO / RAW CONTROL · Synthetic demo values are not production norms.</div>
     </main>
   </div>
 </div>
@@ -117,7 +119,7 @@ const api='',generator='http://192.168.0.51:8010',sessionKey='raw-material-sessi
 const $=id=>document.getElementById(id);const esc=value=>String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));const num=value=>Number(value||0).toLocaleString('ru-RU',{maximumFractionDigits:1});const statusLabel={GOOD:'GOOD',REWORK:'REWORK',REJECTED:'REJECTED'};
 async function apiCall(path,options={}){const headers=new Headers(options.headers||{});if(session?.token)headers.set('Authorization','Bearer '+session.token);if(options.body&&typeof options.body==='string'&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');const response=await fetch(api+path,{...options,headers});let data={};try{data=await response.json()}catch(_){}if(!response.ok){const detail=data.detail;throw Error(typeof detail==='string'?detail:detail?.message||'Запрос не выполнен')}return data}
 function showAuth(){ $('authScreen').classList.remove('hidden');$('appShell').classList.add('hidden') }
-function showApp(){ $('authScreen').classList.add('hidden');$('appShell').classList.remove('hidden');const isAdmin=!!session.user.is_admin;const accountNav=$('accountNav');if(accountNav){accountNav.dataset.page=isAdmin?'admin':'account';accountNav.title=isAdmin?'Открыть администрирование':'Открыть аккаунт';$('accountNavLabel').textContent=session.user.username}if($('accountPageName'))$('accountPageName').textContent=session.user.username;if($('accountAvatar'))$('accountAvatar').textContent=(session.user.username||'W').slice(0,1).toUpperCase();const adminHeading=document.querySelector('#admin .page-heading');if(isAdmin&&!$('adminLogout')&&adminHeading)adminHeading.insertAdjacentHTML('beforeend','<div class="heading-actions"><button id="adminLogout" class="danger-button" type="button" onclick="logout()">Выйти</button></div>');$('clearDataButton')?.classList.toggle('hidden',!isAdmin);loadMaterials().finally(()=>{loadBatches();loadChats();if(isAdmin)loadAdmin()}) }
+function showApp(){ $('authScreen').classList.add('hidden');$('appShell').classList.remove('hidden');const isAdmin=!!session.user.is_admin;const accountNav=$('accountNav');if(accountNav){accountNav.dataset.page=isAdmin?'admin':'account';accountNav.title=isAdmin?'Открыть администрирование':'Открыть аккаунт';$('accountNavLabel').textContent=session.user.username}if($('accountPageName'))$('accountPageName').textContent=session.user.username;if($('accountAvatar'))$('accountAvatar').textContent=(session.user.username||'W').slice(0,1).toUpperCase();$('admin')?.classList.toggle('hidden',!isAdmin);const adminHeading=document.querySelector('#admin .page-heading');if(isAdmin&&!$('adminLogout')&&adminHeading)adminHeading.insertAdjacentHTML('beforeend','<div class="heading-actions"><button id="adminLogout" class="danger-button" type="button" onclick="logout()">Выйти</button></div>');$('clearDataButton')?.classList.toggle('hidden',!isAdmin);loadMaterials().finally(()=>{loadBatches();loadChats();if(isAdmin)loadAdmin()}) }
 async function authSubmit(event){event.preventDefault();$('authError').textContent='';const button=$('authSubmit');button.disabled=true;try{const path=registerMode?'/api/v1/auth/register':'/api/v1/auth/login';session=await apiCall(path,{method:'POST',body:JSON.stringify({username:$('authUser').value.trim(),password:$('authPass').value})});localStorage.setItem(sessionKey,JSON.stringify(session));showApp()}catch(error){$('authError').textContent=error.message}finally{button.disabled=false}}
 $('authForm').onsubmit=authSubmit;$('authToggle').onclick=()=>{registerMode=!registerMode;$('authTitle').textContent=registerMode?'Создать аккаунт':'Войти в систему';$('authSubtitle').textContent=registerMode?'Регистрация нового рабочего аккаунта.':'Используйте рабочие учётные данные, чтобы продолжить.';$('authSubmit').textContent=registerMode?'Зарегистрироваться':'Войти';$('authToggle').textContent=registerMode?'Уже есть аккаунт':'Создать аккаунт';$('authPass').autocomplete=registerMode?'new-password':'current-password';$('authError').textContent=''};
 async function logout(){try{await apiCall('/api/v1/auth/logout',{method:'POST'})}catch(_){}localStorage.removeItem(sessionKey);session=null;showAuth()}
