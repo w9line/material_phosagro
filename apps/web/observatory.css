@@ -90,6 +90,13 @@ html[data-theme="observatory"] .composer-send{width:34px;height:34px;border-radi
 html[data-theme="observatory"] .sidebar-toggle,html[data-theme="observatory"] .chart-modal-close{border-radius:2px;background:transparent;border-color:var(--ink);color:var(--ink)}
 html[data-theme="observatory"] .chat-report{border-color:var(--line)}
 html[data-theme="observatory"] .chat-report button{border-radius:2px;background:var(--ink);border-color:var(--ink);color:var(--paper)}
+html[data-theme="observatory"] .chat-chart{margin-top:14px;padding:14px;border:1px solid var(--ink);border-radius:3px;background:var(--paper)}
+html[data-theme="observatory"] .chart-card-head{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+html[data-theme="observatory"] .chart-card-head strong{font-family:var(--font-display);font-size:18px;font-weight:500;margin-right:auto}
+html[data-theme="observatory"] .chart-picker,html[data-theme="observatory"] .chart-modal-controls label{display:flex;align-items:center;gap:7px;color:var(--mid);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em}
+html[data-theme="observatory"] .chart-picker select,html[data-theme="observatory"] .chart-modal-controls select{min-height:30px;border:1px solid var(--line);border-radius:2px;background:var(--canvas);color:var(--ink);padding:4px 7px;font:12px Arial,Helvetica,sans-serif;text-transform:none;letter-spacing:normal}
+html[data-theme="observatory"] .chart-card-head .link-button{font-size:12px}
+html[data-theme="observatory"] .chart-modal-controls{display:flex;align-items:center;gap:12px}
 html[data-theme="observatory"] .auth-screen{background:var(--canvas)}
 html[data-theme="observatory"] .auth-shell{max-width:1120px;grid-template-columns:1fr 390px;gap:100px}
 html[data-theme="observatory"] .auth-copy h1{font:500 clamp(54px,7vw,84px)/.9 var(--font-display);letter-spacing:-.07em;color:var(--ink)}

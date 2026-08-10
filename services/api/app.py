@@ -29,6 +29,10 @@ def observatory_styles() -> FileResponse: return FileResponse(Path(__file__).par
 def javascript() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "app.js", media_type="application/javascript")
 
 
+@app.get("/chart-ui.js", include_in_schema=False)
+def chart_javascript() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "chart-ui.js", media_type="application/javascript")
+
+
 @app.post("/api/v1/auth/register")
 def register(payload: AuthIn) -> dict[str, Any]:
     username = payload.username.strip()
