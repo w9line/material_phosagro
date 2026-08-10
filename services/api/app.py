@@ -21,6 +21,10 @@ def index() -> FileResponse: return FileResponse(Path(__file__).parent / "web" /
 def styles() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "styles.css", media_type="text/css")
 
 
+@app.get("/observatory.css", include_in_schema=False)
+def observatory_styles() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "observatory.css", media_type="text/css")
+
+
 @app.get("/app.js", include_in_schema=False)
 def javascript() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "app.js", media_type="application/javascript")
 
