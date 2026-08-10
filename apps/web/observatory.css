@@ -98,5 +98,26 @@ html[data-theme="observatory"] .auth-card h2{font:500 28px var(--font-display)}
 html[data-theme="observatory"] .admin-chat-view{background:var(--surface);border-color:var(--line);border-radius:2px;color:var(--ink)}
 html[data-theme="observatory"] .footer-note{color:var(--mid);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}
 html[data-theme="observatory"] ::selection{background:#e8bfaa;color:var(--ink)}
+html[data-theme="observatory"] .page.active{animation:observatory-page-in .22s ease-out both}
+html[data-theme="observatory"] .side-nav button,html[data-theme="observatory"] .primary,html[data-theme="observatory"] .secondary,html[data-theme="observatory"] .outline,html[data-theme="observatory"] .danger-button,html[data-theme="observatory"] .composer-send,html[data-theme="observatory"] .blueprint-step,html[data-theme="observatory"] .attention-item{transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .16s ease}
+html[data-theme="observatory"] .side-nav button{position:relative}
+html[data-theme="observatory"] .side-nav button:before{content:"";position:absolute;left:-18px;top:0;bottom:0;width:0;background:var(--accent);transition:width .16s ease}
+html[data-theme="observatory"] .side-nav button:hover:before,html[data-theme="observatory"] .side-nav button.active:before{width:3px}
+html[data-theme="observatory"] .card:hover{border-color:#8f897d}
+html[data-theme="observatory"] .metric-card:hover{background:rgba(255,255,255,.34)}
+html[data-theme="observatory"] .status-row:hover{background:rgba(255,255,255,.34)}
+html[data-theme="observatory"] .attention-item:hover{border-color:var(--ink);transform:translateX(3px)}
+html[data-theme="observatory"] .blueprint-step:hover{background:rgba(255,255,255,.36);transform:translateY(-2px)}
+html[data-theme="observatory"] .data-table tbody tr{transition:background-color .14s ease}
+html[data-theme="observatory"] .data-table tbody tr:hover{background:rgba(255,255,255,.42)}
+html[data-theme="observatory"] .primary:active,html[data-theme="observatory"] .secondary:active,html[data-theme="observatory"] .outline:active,html[data-theme="observatory"] .composer-send:active{transform:translateY(1px)}
+html[data-theme="observatory"] .composer-send{transition:background-color .16s ease,transform .16s ease}
+html[data-theme="observatory"] .composer-send:hover{background:var(--ink);transform:translateX(2px)}
+html[data-theme="observatory"] .quick button,html[data-theme="observatory"] .choices button{position:relative;transition:color .16s ease,border-color .16s ease,background-color .16s ease;padding-right:18px}
+html[data-theme="observatory"] .quick button:after,html[data-theme="observatory"] .choices button b{transition:opacity .16s ease,transform .16s ease}
+html[data-theme="observatory"] .quick button:after{content:"↗";position:absolute;right:2px;opacity:0;transform:translate(-4px,2px);color:var(--accent)}
+html[data-theme="observatory"] .quick button:hover:after{opacity:1;transform:translate(0,0)}
+@keyframes observatory-page-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){html[data-theme="observatory"] *,html[data-theme="observatory"] *:before,html[data-theme="observatory"] *:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 @media(max-width:1000px){html[data-theme="observatory"] .sidebar{background:var(--paper);border-bottom-color:var(--ink)}html[data-theme="observatory"] .topbar{border-bottom-color:var(--ink)}}
 @media(max-width:720px){html[data-theme="observatory"] .content{padding-left:14px;padding-right:14px}html[data-theme="observatory"] .metrics{grid-template-columns:repeat(2,1fr)}html[data-theme="observatory"] .metric-card{border-bottom:1px solid var(--line)}html[data-theme="observatory"] .metric-card:nth-child(2){border-right:0}html[data-theme="observatory"] .metric-card strong{font-size:29px}html[data-theme="observatory"] .auth-shell{grid-template-columns:1fr;gap:22px}html[data-theme="observatory"] .auth-copy h1{font-size:56px}}
