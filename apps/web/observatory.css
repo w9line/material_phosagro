@@ -266,5 +266,8 @@ html[data-theme="observatory"] .chart-modal-body{background:var(--surface);borde
 html[data-theme="observatory"] .card:hover{border-color:#d5d5d5}
 html[data-theme="observatory"] .quick button,html[data-theme="observatory"] .choices button{border-color:var(--line);border-radius:18px;background:var(--surface);color:var(--ink)}
 html[data-theme="observatory"] .quick button:hover,html[data-theme="observatory"] .choices button:hover{background:var(--paper);border-color:#bdbdbd;color:var(--ink)}
+html[data-theme="observatory"] .scenario-policy-choices{display:flex;gap:8px;padding:0;border:0}
+html[data-theme="observatory"] .scenario-policy-choices button{flex:1}
+html[data-theme="observatory"] .scenario-policy-choices button.active{background:var(--ink);border-color:var(--ink);color:#fff}
 html[data-theme="observatory"] .page.active{animation:observatory-page-in .16s ease-out both}
 @media(max-width:720px){html[data-theme="observatory"] .content{padding-left:16px;padding-right:16px}html[data-theme="observatory"] .overview-intro{padding:20px}html[data-theme="observatory"] .overview-intro h1{font-size:44px}html[data-theme="observatory"] .overview-intro-top{align-items:flex-start;flex-direction:column;gap:12px}html[data-theme="observatory"] .metric-card{padding:16px}html[data-theme="observatory"] .metric-card strong{font-size:30px}html[data-theme="observatory"] .auth-shell{grid-template-columns:1fr;gap:20px}html[data-theme="observatory"] .auth-copy h1{font-size:48px}}

@@ -348,9 +348,6 @@ def chat(payload: ChatIn, request: Request) -> Any:
         if any(word in normalized for word in ("остат", "склад", "запас")) and intent["intent"] != "EXECUTE_TOOL" and not material and "все" not in normalized and "всем" not in normalized and not explanation:
             answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
             con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
-        if any(word in normalized for word in ("сравни стратег", "сравнить стратег")) and not any(word in normalized for word in ("fifo", "hybrid", "концентрац")) and not explanation:
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какие стратегии сравнить?", "question": "Какие стратегии сравнить?", "needs_clarification": True, "choices": [{"label": "Все три стратегии", "value": "Сравни все стратегии распределения"}, {"label": "FIFO vs Hybrid", "value": "Сравни стратегии FIFO и hybrid"}, {"label": "FIFO vs концентрация", "value": "Сравни strict_fifo и max_concentration"}], "tool_calls": []}
-            con = db(); save_message(con, chat_id, "assistant", answer["answer"]); con.commit(); con.close(); return answer
         name, answer, data, trace = llm_agent(payload.message, history)
         trace = trace_with_result(trace, data)
         response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "llm" if name == "llm" else "offline", "answer": answer, "tool": trace[-1]["tool"] if trace else None, "tool_calls": trace, "result": data}
@@ -395,9 +392,6 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
                 yield sse_event({"type": "token", "text": response["answer"]})
             elif any(word in normalized for word in ("остат", "склад", "запас")) and intent["intent"] != "EXECUTE_TOOL" and not requested_material(payload.message) and "все" not in normalized and "всем" not in normalized and not explanation:
                 response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "По какому материалу показать остатки?", "question": "По какому материалу показать остатки?", "needs_clarification": True, "choices": material_choices("Покажи остатки"), "tool_calls": []}
-                yield sse_event({"type": "token", "text": response["answer"]})
-            elif any(word in normalized for word in ("сравни стратег", "сравнить стратег")) and not any(word in normalized for word in ("fifo", "hybrid", "концентрац")) and not explanation:
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": "Какие стратегии сравнить?", "question": "Какие стратегии сравнить?", "needs_clarification": True, "choices": [{"label": "Все три стратегии", "value": "Сравни все стратегии распределения"}, {"label": "FIFO vs Hybrid", "value": "Сравни стратегии FIFO и hybrid"}, {"label": "FIFO vs концентрация", "value": "Сравни strict_fifo и max_concentration"}], "tool_calls": []}
                 yield sse_event({"type": "token", "text": response["answer"]})
             else:
                 yield sse_event({"type": "status", "text": "Запрашиваю расчёт…"})
