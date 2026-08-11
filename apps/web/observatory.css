@@ -30,7 +30,7 @@ html[data-theme="observatory"] .card-header{border-color:var(--line)}
 html[data-theme="observatory"] .card-header h2,html[data-theme="observatory"] .card-header h3{font-family:var(--font-display);font-size:20px;font-weight:500;letter-spacing:-.03em}
 html[data-theme="observatory"] .card-header p,html[data-theme="observatory"] .muted{color:var(--mid)}
 html[data-theme="observatory"] .hero-card .card:first-child{min-height:320px;position:relative;overflow:hidden;background:var(--paper);border-top:5px solid var(--accent)}
-html[data-theme="observatory"] .hero-card .card:first-child:after{content:"RAW / 26";position:absolute;right:22px;bottom:19px;color:var(--line);font:11px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em}
+html[data-theme="observatory"] .hero-card .card:first-child:after{display:none}
 html[data-theme="observatory"] .hero-card h1{font:500 clamp(48px,6vw,78px)/.88 var(--font-display);letter-spacing:-.07em;color:var(--ink);margin-top:23px}
 html[data-theme="observatory"] .hero-card p{max-width:600px;color:var(--mid);font-size:16px}
 html[data-theme="observatory"] .hero-actions{margin-top:34px}
@@ -124,13 +124,13 @@ html[data-theme="observatory"] .quick button,html[data-theme="observatory"] .cho
 html[data-theme="observatory"] .quick button:after,html[data-theme="observatory"] .choices button b{transition:opacity .16s ease,transform .16s ease}
 html[data-theme="observatory"] .quick button:after{content:"↗";position:absolute;right:2px;opacity:0;transform:translate(-4px,2px);color:var(--accent)}
 html[data-theme="observatory"] .quick button:hover:after{opacity:1;transform:translate(0,0)}
-html[data-theme="observatory"] .overview-intro{min-height:318px!important;border-top:5px solid var(--accent)!important;position:relative;overflow:hidden}
+html[data-theme="observatory"] .overview-intro{min-height:246px!important;border-top:5px solid var(--accent)!important;position:relative;overflow:hidden}
 html[data-theme="observatory"] .overview-intro-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
-html[data-theme="observatory"] .overview-intro h1{margin:28px 0 16px;font:500 clamp(52px,6vw,82px)/.86 var(--font-display);letter-spacing:-.08em}
-html[data-theme="observatory"] .overview-intro p{max-width:610px;margin:0;color:var(--mid);font-size:17px;line-height:1.45}
+html[data-theme="observatory"] .overview-intro h1{margin:19px 0 12px;font:500 clamp(48px,5vw,68px)/.88 var(--font-display);letter-spacing:-.08em}
+html[data-theme="observatory"] .overview-intro p{max-width:610px;margin:0;color:var(--mid);font-size:15px;line-height:1.4}
 html[data-theme="observatory"] .live-marker{display:inline-flex;align-items:center;gap:7px;color:var(--green);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
 html[data-theme="observatory"] .live-marker i{width:7px;height:7px;background:var(--green);display:inline-block}
-html[data-theme="observatory"] .overview-stamp{position:absolute;right:22px;bottom:20px;color:var(--line);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase}
+html[data-theme="observatory"] .overview-stamp{position:static;margin-top:18px;color:var(--mid);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase}
 html[data-theme="observatory"] .demo-action{color:var(--mid);border-color:var(--line)}
 html[data-theme="observatory"] .demo-action:hover{color:var(--ink);border-color:var(--ink)}
 html[data-theme="observatory"] .page-heading h1{letter-spacing:-.06em}
