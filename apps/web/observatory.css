@@ -124,6 +124,16 @@ html[data-theme="observatory"] .quick button,html[data-theme="observatory"] .cho
 html[data-theme="observatory"] .quick button:after,html[data-theme="observatory"] .choices button b{transition:opacity .16s ease,transform .16s ease}
 html[data-theme="observatory"] .quick button:after{content:"↗";position:absolute;right:2px;opacity:0;transform:translate(-4px,2px);color:var(--accent)}
 html[data-theme="observatory"] .quick button:hover:after{opacity:1;transform:translate(0,0)}
+html[data-theme="observatory"] .chat-status.is-busy{animation:observatory-status-breathe 1.15s ease-in-out infinite}
+html[data-theme="observatory"] .chat-chart{animation:observatory-chart-in .28s ease-out both}
+html[data-theme="observatory"] .chat-chart svg>rect:not([width="100%"]){transform-box:fill-box;transform-origin:center bottom;animation:observatory-bar-in .42s cubic-bezier(.2,.7,.2,1) both}
+html[data-theme="observatory"] .chat-chart svg>polyline{stroke-dasharray:1200;stroke-dashoffset:1200;animation:observatory-line-in .7s ease-out both}
+html[data-theme="observatory"] .chat-chart svg>circle{transform-box:fill-box;transform-origin:center;animation:observatory-point-in .35s ease-out both}
+@keyframes observatory-status-breathe{0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes observatory-chart-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes observatory-bar-in{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes observatory-line-in{to{stroke-dashoffset:0}}
+@keyframes observatory-point-in{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
 @keyframes observatory-page-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){html[data-theme="observatory"] *,html[data-theme="observatory"] *:before,html[data-theme="observatory"] *:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 @media(max-width:1000px){html[data-theme="observatory"] .sidebar{background:var(--paper);border-bottom-color:var(--ink)}html[data-theme="observatory"] .topbar{border-bottom-color:var(--ink)}}

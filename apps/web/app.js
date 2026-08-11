@@ -39,7 +39,91 @@ function toggleChatSidebar(){const layout=$('chatLayout');if(!layout)return;layo
 function chatReportFor(message){const call=(message.trace||[]).find(item=>item.tool==='build_weekly_plan'||item.tool==='generate_rejection_report');if(!call)return null;return {kind:call.tool==='build_weekly_plan'?'plan':'rejection',label:call.tool==='build_weekly_plan'?'Открыть недельный план':'Открыть отчёт по браку',args:call.arguments||{}}}
 function openChatReport(card){if(card.kind==='plan'){const requirements=card.args.requirements||{};materialCodes.forEach(code=>{if($(`req-${code}`))$(`req-${code}`).value=requirements[code]??0});$('policy').value=card.args.policy||'hybrid';switchPage('planning');plan()}else{$('reportMaterial').value=card.args.material_type||'';switchPage('reports');report()}}
 function renderMessages(){const box=$('messages');if(!chatHistory.length){box.innerHTML='<div class="empty-state">Начните разговор с ассистентом.<br><span class="muted">Подсказки ниже только заполняют поле ввода.</span></div>';return}box.innerHTML=chatHistory.map(message=>`<div class="message ${message.role==='user'?'user':'assistant'}">${esc(message.content)}${message.trace?.length?`<small>Инструменты: ${message.trace.map(trace=>esc(trace.tool)+' · '+esc(trace.status)).join(' → ')}</small>`:''}${message.choices?.length?`<div class="choices"><div class="choice-label">Уточнить запрос:</div>${message.choices.map(choice=>`<button type="button" onclick="sendChat(${JSON.stringify(choiceValue(choice))})"><span>${esc(choiceLabel(choice))}</span><b>↗</b></button>`).join('')}</div>`:''}</div>`).join('');box.scrollTop=box.scrollHeight}
-async function sendChat(prefilled){const input=$('question');const text=(prefilled??input.value).trim();if(!text)return;if(!prefilled)input.value='';chatHistory.push({role:'user',content:text});const assistant={role:'assistant',content:'',trace:[],choices:[],result:null};chatHistory.push(assistant);renderMessages();$('chatStatus').textContent='● считает…';$('chatHint').textContent='Подключаюсь к расчёту…';const renderStream=()=>{renderMessages()};const handleEvent=event=>{if(event.type==='status'){$('chatStatus').textContent='● '+event.text;$('chatHint').textContent='Инструментальный расчёт'}else if(event.type==='tool'){assistant.trace.push({tool:event.tool,status:event.status});$('chatHint').textContent='Выполнен инструмент: '+event.tool}else if(event.type==='token'){assistant.content+=event.text;renderStream()}else if(event.type==='error'){assistant.content='Ошибка: '+event.message;$('chatStatus').textContent='● ошибка'}else if(event.type==='done'){const result=event.response||{};assistant.content=result.answer||assistant.content||'Готово.';assistant.trace=result.tool_calls||assistant.trace;assistant.choices=result.choices||[];assistant.result=result.result||null;$('chatStatus').textContent=result.mode==='llm'?'● VseLLM подключён':'● готов';renderStream()}};try{const response=await fetch(api+'/api/v1/agent/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.token},body:JSON.stringify({message:text,chat_id:activeChatId})});if(!response.ok){let error={};try{error=await response.json()}catch(_){ }throw Error(error.detail||'Запрос не выполнен')}if(!response.body)throw Error('Браузер не поддерживает потоковый ответ');const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const chunk=await reader.read();if(chunk.done)break;buffer+=decoder.decode(chunk.value,{stream:true});const frames=buffer.split('\n\n');buffer=frames.pop()||'';for(const frame of frames){const line=frame.split('\n').find(item=>item.startsWith('data:'));if(line)handleEvent(JSON.parse(line.slice(5).trim()))}}if(buffer.trim()){const line=buffer.split('\n').find(item=>item.startsWith('data:'));if(line)handleEvent(JSON.parse(line.slice(5).trim()))}}catch(error){assistant.content='Ошибка: '+error.message;$('chatStatus').textContent='● ошибка';renderStream()}finally{$('chatHint').textContent='Enter — отправить · Shift+Enter — новая строка';const list=await apiCall('/api/v1/chats');renderChatList(list)}}
+function revealAnswer(message, fullText){
+  const current=message.content||'';
+  if(current===fullText)return Promise.resolve();
+  const start=fullText.startsWith(current)?current:'';
+  const remaining=fullText.slice(start.length);
+  const duration=Math.min(900,Math.max(240,remaining.length*3));
+  message.content=start;
+  return new Promise(resolve=>{
+    const started=performance.now();
+    const tick=now=>{
+      const progress=Math.min(1,(now-started)/duration);
+      message.content=start+remaining.slice(0,Math.ceil(remaining.length*progress));
+      renderMessages();
+      if(progress<1)requestAnimationFrame(tick);else resolve();
+    };
+    requestAnimationFrame(tick);
+  });
+}
+async function sendChat(prefilled){
+  const input=$('question');
+  const text=(prefilled??input.value).trim();
+  if(!text)return;
+  if(!prefilled)input.value='';
+  chatHistory.push({role:'user',content:text});
+  const assistant={role:'assistant',content:'',trace:[],choices:[],result:null};
+  chatHistory.push(assistant);
+  renderMessages();
+  $('chatStatus').textContent='● считает…';
+  $('chatStatus').classList.add('is-busy');
+  $('chatHint').textContent='Подключаюсь к расчёту…';
+  const renderStream=()=>renderMessages();
+  const handleEvent=async event=>{
+    if(event.type==='status'){
+      $('chatStatus').textContent='● '+event.text;
+      $('chatHint').textContent='Инструментальный расчёт';
+    }else if(event.type==='tool'){
+      assistant.trace.push({tool:event.tool,status:event.status});
+      $('chatHint').textContent='Выполнен инструмент: '+event.tool;
+    }else if(event.type==='token'){
+      assistant.content+=event.text;
+      renderStream();
+    }else if(event.type==='error'){
+      assistant.content='Ошибка: '+event.message;
+      $('chatStatus').classList.remove('is-busy');
+      $('chatStatus').textContent='● ошибка';
+    }else if(event.type==='done'){
+      const result=event.response||{};
+      const answer=result.answer||assistant.content||'Готово.';
+      await revealAnswer(assistant,answer);
+      assistant.trace=result.tool_calls||assistant.trace;
+      assistant.choices=result.choices||[];
+      assistant.result=result.result||null;
+      $('chatStatus').classList.remove('is-busy');
+      $('chatStatus').textContent=result.mode==='llm'?'● VseLLM подключён':'● готов';
+      renderStream();
+    }
+  };
+  try{
+    const response=await fetch(api+'/api/v1/agent/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.token},body:JSON.stringify({message:text,chat_id:activeChatId})});
+    if(!response.ok){let error={};try{error=await response.json()}catch(_){ }throw Error(error.detail||'Запрос не выполнен')}
+    if(!response.body)throw Error('Браузер не поддерживает потоковый ответ');
+    const reader=response.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+    while(true){
+      const chunk=await reader.read();
+      if(chunk.done)break;
+      buffer+=decoder.decode(chunk.value,{stream:true});
+      const frames=buffer.split('\n\n');
+      buffer=frames.pop()||'';
+      for(const frame of frames){const line=frame.split('\n').find(item=>item.startsWith('data:'));if(line)await handleEvent(JSON.parse(line.slice(5).trim()))}
+    }
+    if(buffer.trim()){const line=buffer.split('\n').find(item=>item.startsWith('data:'));if(line)await handleEvent(JSON.parse(line.slice(5).trim()))}
+  }catch(error){
+    assistant.content='Ошибка: '+error.message;
+    $('chatStatus').classList.remove('is-busy');
+    $('chatStatus').textContent='● ошибка';
+    renderStream();
+  }finally{
+    $('chatStatus').classList.remove('is-busy');
+    $('chatHint').textContent='Enter — отправить · Shift+Enter — новая строка';
+    const list=await apiCall('/api/v1/chats');
+    renderChatList(list);
+  }
+}
 function registrationText(open){$('registrationLabel').textContent=open?'Открыта':'Закрыта';$('registrationLabel').className='badge '+(open?'':'danger')}
 async function loadAdmin(){if(!session?.user?.is_admin)return;try{const settings=await apiCall('/api/v1/admin/settings');$('registrationOpen').checked=settings.registration_open;registrationText(settings.registration_open);const users=await apiCall('/api/v1/admin/users');$('adminUsers').innerHTML=users.map(user=>`<tr><td><strong>${esc(user.username)}</strong></td><td>${user.is_admin?'<span class="badge badge-solid">admin</span>':'<span class="badge">user</span>'}</td><td class="${user.is_blocked?'status-rejected':'status-good'}">${user.is_blocked?'Заблокирован':'Активен'}</td><td>${user.user_id===session.user.user_id?'—':`<button class="${user.is_blocked?'outline':'danger-button'}" onclick="blockUser('${user.user_id}',${!user.is_blocked})">${user.is_blocked?'Разблокировать':'Заблокировать'}</button>`}</td></tr>`).join('');const chats=await apiCall('/api/v1/admin/chats');$('adminChats').innerHTML=chats.length?chats.map(chat=>`<tr><td>${esc(chat.username)}</td><td><button class="link-button" onclick="viewAdminChat('${chat.chat_id}')">${esc(chat.title)}</button></td><td>${esc(chat.updated_at.slice(0,16).replace('T',' '))}</td></tr>`).join(''):'<tr><td colspan="3" class="empty-state">Чатов пока нет.</td></tr>'}catch(error){$('adminChatView').textContent=error.message}}
 async function toggleRegistration(){try{const value=$('registrationOpen').checked;const result=await apiCall('/api/v1/admin/settings',{method:'PUT',body:JSON.stringify({registration_open:value})});registrationText(result.registration_open)}catch(error){$('registrationOpen').checked=!$('registrationOpen').checked;alert(error.message)}}
