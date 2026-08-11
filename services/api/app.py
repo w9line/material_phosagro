@@ -1,5 +1,6 @@
 from core import *
 from agent import llm_agent, llm_agent_stream
+from urllib.parse import quote
 
 def sse_event(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -31,6 +32,29 @@ def javascript() -> FileResponse: return FileResponse(Path(__file__).parent / "w
 
 @app.get("/chart-ui.js", include_in_schema=False)
 def chart_javascript() -> FileResponse: return FileResponse(Path(__file__).parent / "web" / "chart-ui.js", media_type="application/javascript")
+
+
+@app.post("/api/v1/generator/generate")
+def generator_generate(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    current_user(request)
+    endpoint = os.getenv("DATA_GENERATOR_URL", "http://data-generator:8010").rstrip("/") + "/api/v1/generate"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    try:
+        with urlopen(URLRequest(endpoint, data=body, headers={"Content-Type": "application/json"}), timeout=45) as response:
+            return json.loads(response.read())
+    except Exception as exc:
+        raise HTTPException(502, f"Генератор недоступен: {exc}") from exc
+
+
+@app.get("/api/v1/generator/download/{generation_id}")
+def generator_download(generation_id: str, request: Request) -> StreamingResponse:
+    current_user(request)
+    endpoint = os.getenv("DATA_GENERATOR_URL", "http://data-generator:8010").rstrip("/") + "/api/v1/download/" + quote(generation_id, safe="")
+    try:
+        with urlopen(endpoint, timeout=45) as response:
+            return StreamingResponse(iter([response.read()]), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=generated_dataset.zip"})
+    except Exception as exc:
+        raise HTTPException(502, f"Архив генератора недоступен: {exc}") from exc
 
 
 @app.post("/api/v1/auth/register")
