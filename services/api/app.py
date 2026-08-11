@@ -329,7 +329,7 @@ def chat(payload: ChatIn, request: Request) -> Any:
         normalized = payload.message.lower(); explanation = explanation_tool_for_message(payload.message)
         intent = route_intent(payload.message, history)
         if intent["intent"] == "CLARIFY":
-            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": clarification_text(intent), "question": clarification_text(intent), "needs_clarification": True, "choices": intent.get("choices", []), "tool_calls": []}
+            answer = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": clarification_text(intent), "question": clarification_text(intent), "needs_clarification": True, "choices": intent.get("choices", []), "choice_flow": intent.get("choice_flow"), "tool_calls": []}
             con = db(); save_message(con, chat_id, answer["answer"]); con.commit(); con.close(); return answer
         if any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[a-z][a-z0-9_-]{0,15}-\d+\b", normalized) and "сам" not in normalized and not explanation:
             con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
@@ -380,7 +380,7 @@ def chat_stream(payload: ChatIn, request: Request) -> StreamingResponse:
             intent = route_intent(payload.message, history)
             if intent["intent"] == "CLARIFY":
                 answer = clarification_text(intent)
-                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": answer, "question": answer, "needs_clarification": True, "choices": intent.get("choices", []), "tool_calls": []}
+                response = {"run_id": str(uuid.uuid4()), "chat_id": chat_id, "mode": "assistant", "answer": answer, "question": answer, "needs_clarification": True, "choices": intent.get("choices", []), "choice_flow": intent.get("choice_flow"), "tool_calls": []}
                 yield sse_event({"type": "token", "text": answer})
             elif any(x in normalized for x in ("проверь партию", "карточк* партии")) and not re.search(r"\b[a-z][a-z0-9_-]{0,15}-\d+\b", normalized) and "сам" not in normalized and not explanation:
                 con = db(); choices = [r[0] for r in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()

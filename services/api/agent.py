@@ -6,7 +6,7 @@ def llm_agent(message: str, history: list[dict[str, str]]) -> tuple[str, str, An
     base = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     intent = route_intent(message, history)
     if intent["intent"] == "OUT_OF_SCOPE": return "assistant", intent["answer"], None, []
-    if intent["intent"] == "CLARIFY": return "assistant", clarification_text(intent), {"choices": intent.get("choices", [])}, []
+    if intent["intent"] == "CLARIFY": return "assistant", clarification_text(intent), {"choices": intent.get("choices", []), "choice_flow": intent.get("choice_flow")}, []
     routed = routed_tool_result(message, history)
     if routed or intent["intent"] == "EXPLAIN_TOOL" or (intent["intent"] == "GENERAL_HELP" and not llm_may_select_tool(message)):
         name, data, trace = routed or (intent.get("tool_name"), None, [])
@@ -86,7 +86,7 @@ def llm_agent_stream(message: str, history: list[dict[str, str]]):
     if intent["intent"] == "CLARIFY":
         answer = clarification_text(intent)
         yield {"type": "token", "text": answer}
-        yield {"type": "done", "response": {"mode": "assistant", "answer": answer, "result": {"choices": intent.get("choices", [])}, "choices": intent.get("choices", []), "needs_clarification": True, "tool_calls": []}}
+        yield {"type": "done", "response": {"mode": "assistant", "answer": answer, "result": {"choices": intent.get("choices", [])}, "choices": intent.get("choices", []), "choice_flow": intent.get("choice_flow"), "needs_clarification": True, "tool_calls": []}}
         return
     key = os.getenv("LLM_API_KEY")
     if not key: raise RuntimeError("VseLLM не подключён: отсутствует LLM_API_KEY")

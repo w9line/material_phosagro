@@ -805,6 +805,13 @@ def material_choices(prompt: str) -> list[dict[str, str]]:
     return [{"label": "Все материалы", "value": f"{prompt} по всем материалам"}] + [{"label": item, "value": f"{prompt} по материалу {item}"} for item in material_codes()]
 
 
+def batch_choices(prompt: str, limit: int = 20) -> list[dict[str, str]]:
+    con = db()
+    rows = con.execute("SELECT batch_id, material_type, arrival_date FROM batches ORDER BY arrival_date, batch_id LIMIT ?", (min(20, max(1, limit)),)).fetchall()
+    con.close()
+    return [{"label": f"{row['batch_id']} · {row['material_type']} · {row['arrival_date']}", "value": f"{prompt} {row['batch_id']}"} for row in rows]
+
+
 PROMPT_INJECTION_MARKERS = (
     r"\bигнорируй\b.*(?:инструк|правил|систем|контекст)",
     r"\bзабудь\b.*(?:инструк|правил|контекст|всё|все)",
@@ -911,6 +918,12 @@ def clarification_text(intent: dict[str, Any]) -> str:
         return "Уточните, числа указаны как масса активного вещества или как масса сырья."
     if intent.get("tool_name") == "check_material_deficit" and "requirements" in missing:
         return "Укажите потребность в кг активного вещества, например: A 3000, B 2500, C 1800."
+    if intent.get("tool_name") == "build_weekly_plan":
+        return "Выберите стратегию распределения, затем укажите потребность по каждому материалу в кг активного вещества."
+    if intent.get("tool_name") == "get_batch_details" and "batch_id" in missing:
+        return "Выберите партию — покажу её фактические параметры и расчёт активного вещества."
+    if intent.get("tool_name") == "check_batch_quality" and "batch_id" in missing:
+        return "Выберите партию — проверю её качество по действующим правилам."
     return "Уточните, пожалуйста: " + ", ".join(missing or ["параметры запроса"]) + "."
 
 
@@ -989,9 +1002,10 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         return {"intent": "EXECUTE_TOOL", "tool_name": "get_batch_details", "arguments": {"batch_id": batch_match.group(1).upper()}, "missing_fields": [], "confidence": 0.99, "reason": "Явно запрошены детали партии"}
     if batch_match and any(word in normalized for word in ("проверь", "качество", "статус", "парт")):
         return {"intent": "EXECUTE_TOOL", "tool_name": "check_batch_quality", "arguments": {"batch_id": batch_match.group(1).upper()}, "missing_fields": [], "confidence": 0.99, "reason": "Явно указана партия и команда проверки"}
-    if any(word in normalized for word in ("проверь качество партии", "проверь партию", "статус партии", "карточка партии")):
-        con = db(); choices = [row[0] for row in con.execute("SELECT batch_id FROM batches ORDER BY arrival_date, batch_id LIMIT 20")]; con.close()
-        return {"intent": "CLARIFY", "tool_name": "check_batch_quality", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для проверки", "choices": choices}
+    if any(phrase in normalized for phrase in ("покажи детали партии", "детали партии", "подробности партии", "карточка партии")):
+        return {"intent": "CLARIFY", "tool_name": "get_batch_details", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для просмотра деталей", "choices": batch_choices("Покажи детали партии")}
+    if any(phrase in normalized for phrase in ("проверь качество партии", "проверь партию", "статус партии")):
+        return {"intent": "CLARIFY", "tool_name": "check_batch_quality", "arguments": {}, "missing_fields": ["batch_id"], "confidence": 0.96, "reason": "Нужно выбрать партию для проверки", "choices": batch_choices("Проверь качество партии")}
     if any(word in normalized for word in ("график", "диаграмм", "визуализ", "построй граф")) and not any(word in normalized for word in ("брак", "отбрак", "отчёт", "отчет", "отклон")):
         arguments = chart_request(message, material)
         if arguments["metric"] in {"deficit_active_mass", "coverage_percent", "loss"} or arguments["group_by"] == "policy":
@@ -1032,7 +1046,7 @@ def route_intent(message: str, history: list[dict[str, str]] | None = None) -> d
         missing_fields = [f"requirements.{m}" for m in missing] + ([] if policy else ["policy"])
         if not missing and not mass_basis(message): missing_fields.append("mass_basis")
         if missing_fields:
-            return {"intent": "CLARIFY", "tool_name": "build_weekly_plan", "arguments": {"requirements": requirements}, "missing_fields": missing_fields, "confidence": 0.94, "reason": "Для preview-плана не хватает обязательных вводных", "choices": [{"label": "Hybrid", "value": "Построй недельный план с policy hybrid"}, {"label": "Strict FIFO", "value": "Построй недельный план с policy strict_fifo"}, {"label": "Max concentration", "value": "Построй недельный план с policy max_concentration"}]}
+            return {"intent": "CLARIFY", "tool_name": "build_weekly_plan", "arguments": {"requirements": requirements}, "missing_fields": missing_fields, "confidence": 0.94, "reason": "Для preview-плана не хватает обязательных вводных", "choice_flow": "weekly_plan", "choices": [{"label": "Hybrid", "value": "Построй недельный план с policy hybrid"}, {"label": "Strict FIFO", "value": "Построй недельный план с policy strict_fifo"}, {"label": "Max concentration", "value": "Построй недельный план с policy max_concentration"}]}
         return {"intent": "EXECUTE_TOOL", "tool_name": "build_weekly_plan", "arguments": {"requirements": requirements, "policy": policy, "allow_rework": True, "mass_basis": mass_basis(message)}, "missing_fields": [], "confidence": 0.98, "reason": "Все обязательные параметры preview-плана указаны"}
     if any(word in normalized for word in ("дефицит", "хватит", "потребн", "вытян", "достат")) and any(word in normalized for word in ("проверь", "посчитай", "есть", "хватит", "вытян", "достат")):
         requirements = parse_requirements(message)
